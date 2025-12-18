@@ -1,0 +1,12 @@
+## Fastpath SUT Login & Permissions Test
+
+From the local workstation, run the following against the SUT (replace <SUT_IP>):
+
+1. SSH connectivity: `ssh fpuser@<SUT_IP> 'whoami && hostname'`
+2. Group membership: `ssh fpuser@<SUT_IP> 'id'` (must include `sudo` and `docker`).
+3. Passwordless sudo: `ssh fpuser@<SUT_IP> 'sudo -n true'`.
+4. Docker access: `ssh fpuser@<SUT_IP> 'docker ps'`.
+5. SSH config perms: `ssh fpuser@<SUT_IP> 'ls -ld ~/.ssh && ls -l ~/.ssh'` (700 dir, 600 files).
+6. Sudoers entry: `ssh ubuntu@<SUT_IP> 'sudo cat /etc/sudoers.d/fpuser'`.
+
+All commands must succeed without password prompts.
