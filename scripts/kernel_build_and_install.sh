@@ -16,7 +16,6 @@ VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
-TAG="${TAG_DEFAULT}"
 CONFIG_FILE="${CONFIG_FILE_DEFAULT}"
 KERNEL_CMDLINE="${KERNEL_CMDLINE_DEFAULT}"
 APPEND_TO_KERNEL_VERSION="${APPEND_TO_KERNEL_VERSION_DEFAULT}"
@@ -27,6 +26,8 @@ KERNEL_DIR="${KERNEL_DIR_DEFAULT}"
 OUTPUT_BASE="${OUTPUT_BASE_DEFAULT}"
 VENV_PATH="${VENV_PATH_DEFAULT}"
 ASSUME_YES="false"
+declare -a TAGS=()
+TOTAL_BUILDS=0
 
 usage() {
   cat <<'USAGE'
@@ -35,17 +36,18 @@ Usage: kernel_build_and_install.sh [options]
 Options:
   --repo <url>                     Kernel git repo (default: Linux stable repo)
   --branch <name>                  Kernel branch to build (default: linux-rolling-stable)
-  --tag <tag>                      Kernel tag to checkout (default: none / latest)
-  --config-file <path>             Custom base config to use instead of current kernel config
-  --kernel-command-line <string>   Override GRUB kernel command line
+  --tag <tag>                      Kernel tag to checkout (can be repeated)
+  --tags <tag1,tag2>               Comma-separated list of tags to build
+  --tag-latest                     Add the latest stable kernel (empty tag)
+  --config-file <path>             Custom base config instead of current kernel config
+  --kernel-command-line <string>   Override GRUB kernel command line on install
   --append-to-kernel-version <str> Text appended to EXTRAVERSION
-  --kernel-dir <path>              Path where the kernel repo will live (default: ~/kernels/linux)
+  --append <str>                   Alias for --append-to-kernel-version
+  --kernel-dir <path>              Base directory for kernel repo (default: ~/kernels/linux)
   --output-base <path>             Directory where build outputs go (default: ~/kernels)
   --kernel-install <bool>          Install kernel artifacts after build (default: false)
-  --change-to-64k <bool>           Enable 64K pages (default: false)
+  --change-to-64k <bool>           Enable 64K page size (default: false)
   --fastpath <bool>                Apply fastpath configs (default: true)
-  --tag-latest                     Shortcut to clear tag (build latest stable)
-  --append <string>                Alias for --append-to-kernel-version
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
@@ -223,79 +225,86 @@ ensure_virtualenv() {
 }
 
 clone_kernel_repo() {
-  log "Cloning kernel repo into ${KERNEL_DIR}"
-  rm -rf "${KERNEL_DIR}"
-  mkdir -p "$(dirname "${KERNEL_DIR}")"
-  git config --global --add safe.directory "${KERNEL_DIR}" >/dev/null 2>&1 || true
-  if [[ -n "${TAG}" ]]; then
-    git clone --depth 1 --branch "${TAG}" "${REPO}" "${KERNEL_DIR}"
-  elif [[ -n "${BRANCH}" ]]; then
-    git clone --depth 1 --branch "${BRANCH}" "${REPO}" "${KERNEL_DIR}"
+  local repo="$1"
+  local branch="$2"
+  local tag="$3"
+  local dest="$4"
+  log "Cloning kernel repo into ${dest}"
+  rm -rf "${dest}"
+  mkdir -p "$(dirname "${dest}")"
+  git config --global --add safe.directory "${dest}" >/dev/null 2>&1 || true
+  if [[ -n "${tag}" ]]; then
+    git clone --depth 1 --branch "${tag}" "${repo}" "${dest}"
+  elif [[ -n "${branch}" ]]; then
+    git clone --depth 1 --branch "${branch}" "${repo}" "${dest}"
   else
-    git clone --depth 1 "${REPO}" "${KERNEL_DIR}"
+    git clone --depth 1 "${repo}" "${dest}"
   fi
 }
 
 prepare_kernel_tree() {
-  log "Cleaning kernel tree"
-  pushd "${KERNEL_DIR}" >/dev/null
+  local kernel_dir="$1"
+  log "Cleaning kernel tree at ${kernel_dir}"
+  pushd "${kernel_dir}" >/dev/null
   make mrproper
   popd >/dev/null
 }
 
 stage_base_config() {
-  local base_config="/tmp/kernel_base.config"
-  if [[ -n "${CONFIG_FILE}" ]]; then
-    cp "${CONFIG_FILE}" "${base_config}"
+  local dest="$1"
+  local source_config="$2"
+  if [[ -n "${source_config}" ]]; then
+    cp "${source_config}" "${dest}"
   else
-    cp "/boot/config-$(uname -r)" "${base_config}"
+    cp "/boot/config-$(uname -r)" "${dest}"
   fi
-  echo "${base_config}"
 }
 
 write_custom_configs() {
-  local file="/tmp/kernel_customizations.config"
+  local file="$1"
+  local fastpath="$2"
+  local change_to_64k="$3"
+  local tag="$4"
   : >"${file}"
   cat >>"${file}" <<'BASE'
 CONFIG_SYSTEM_TRUSTED_KEYS=""
 CONFIG_SYSTEM_REVOCATION_KEYS=""
 BASE
-  if [[ "${FASTPATH}" == "true" ]]; then
+  if [[ "${fastpath}" == "true" ]]; then
     append_fastpath_configs "${file}"
   fi
-  if [[ "${CHANGE_TO_64K}" == "true" ]]; then
+  if [[ "${change_to_64k}" == "true" ]]; then
     cat >>"${file}" <<'PAGES'
 CONFIG_ARM64_64K_PAGES=y
 CONFIG_ARM64_4K_PAGES=n
 PAGES
   fi
-  if [[ -n "${TAG}" ]]; then
-    local numeric_tag="${TAG#v}"
+  if [[ -n "${tag}" ]]; then
+    local numeric_tag="${tag#v}"
     if version_in_range "${numeric_tag}" "6.6" "6.7"; then
       cat >>"${file}" <<'ZSTD'
 CONFIG_MODULE_COMPRESS_ZSTD=n
 ZSTD
     fi
   fi
-  echo "${file}"
 }
 
 update_extraversion() {
+  local kernel_dir="$1"
+  local change_to_64k="$2"
+  local append_value="$3"
   local os_name
-  os_name="$(lsb_release -si 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-  if [[ -z "${os_name}" ]]; then
-    os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  os_name="$(lsb_release -si 2>/dev/null | tr '[:upper:]' '[:lower:]' || uname -s | tr '[:upper:]' '[:lower:]')"
+  local extra="-${os_name}${append_value}"
+  if [[ "${change_to_64k}" == "true" ]]; then
+    extra="-${os_name}-64k${append_value}"
   fi
-  local suffix="${APPEND_TO_KERNEL_VERSION}"
-  local extra="-${os_name}${suffix}"
-  if [[ "${CHANGE_TO_64K}" == "true" ]]; then
-    extra="-${os_name}-64k${suffix}"
-  fi
-  sed -i "s/^EXTRAVERSION = .*/EXTRAVERSION = ${extra}/" "${KERNEL_DIR}/Makefile"
+  sed -i "s/^EXTRAVERSION = .*/EXTRAVERSION = ${extra}/" "${kernel_dir}/Makefile"
 }
 
 collect_kernel_info() {
-  pushd "${KERNEL_DIR}" >/dev/null
+  local kernel_dir="$1"
+  pushd "${kernel_dir}" >/dev/null
   local kernel_version
   kernel_version="$(make kernelversion | tr -d '[:space:]')"
   popd >/dev/null
@@ -303,14 +312,16 @@ collect_kernel_info() {
 }
 
 run_tuxmake_build() {
-  local base_config="$1"
-  local custom_config="$2"
-  local output_dir="$3"
+  local kernel_dir="$1"
+  local base_config="$2"
+  local custom_config="$3"
+  local output_dir="$4"
+  local venv_path="$5"
   mkdir -p "${output_dir}"
-  log "Starting tuxmake build (this can take a while)"
+  log "Building kernel in ${kernel_dir} (output -> ${output_dir})"
   # shellcheck source=/dev/null
-  source "${VENV_PATH}/bin/activate"
-  pushd "${KERNEL_DIR}" >/dev/null
+  source "${venv_path}/bin/activate"
+  pushd "${kernel_dir}" >/dev/null
   tuxmake \
     --output-dir "${output_dir}" \
     --jobs "$(nproc)" \
@@ -325,7 +336,8 @@ run_tuxmake_build() {
 install_kernel_artifacts() {
   local output_dir="$1"
   local kernel_version="$2"
-  log "Installing kernel artifacts"
+  local kernel_cmdline="$3"
+  log "Installing kernel artifacts from ${output_dir}"
   sudo cp "${output_dir}/config" "/boot/config-${kernel_version}"
   sudo cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
   sudo rm -rf "/lib/modules/${kernel_version}"
@@ -334,9 +346,8 @@ install_kernel_artifacts() {
   sudo tar -C /usr/bin -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 ./usr/bin/cpupower
   sudo tar -C /usr/lib -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 --wildcards ./usr/lib/libcpupower.so*
   sudo ldconfig
-
-  if [[ -n "${KERNEL_CMDLINE}" ]]; then
-    sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${KERNEL_CMDLINE}\"/" /etc/default/grub
+  if [[ -n "${kernel_cmdline}" ]]; then
+    sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
   fi
   sudo update-grub || true
 }
@@ -351,14 +362,54 @@ prompt_reboot() {
   fi
 }
 
+describe_tag() {
+  local tag="$1"
+  if [[ -n "${tag}" ]]; then
+    echo "${tag}"
+  else
+    echo "<latest-stable>"
+  fi
+}
+
+build_label() {
+  local tag="$1"
+  local index="$2"
+  local label="${tag:-latest}"
+  label="${label//[^[:alnum:]._-]/-}"
+  if [[ -z "${label}" ]]; then
+    label="build-${index}"
+  else
+    label="${label}-${index}"
+  fi
+  echo "${label}"
+}
+
+determine_kernel_dir() {
+  local label="$1"
+  if (( TOTAL_BUILDS <= 1 )); then
+    echo "${KERNEL_DIR}"
+  else
+    echo "${KERNEL_DIR}-${label}"
+  fi
+}
+
 summarize_settings() {
-  cat <<SUMMARY
+  local formatted_tags=()
+  if (( ${#TAGS[@]} == 0 )); then
+    formatted_tags+=("$(describe_tag "")")
+  else
+    for tag in "${TAGS[@]}"; do
+      formatted_tags+=("$(describe_tag "${tag}")")
+    done
+  fi
+  local tag_summary="$(IFS=','; echo "${formatted_tags[*]}")"
+  cat <<EOF
 Kernel build settings:
   Repo:                ${REPO}
   Branch:              ${BRANCH}
-  Tag:                 ${TAG}
+  Tags:                ${tag_summary}
   Config file:         ${CONFIG_FILE:-/boot/config-$(uname -r)}
-  Kernel dir:          ${KERNEL_DIR}
+  Kernel dir base:     ${KERNEL_DIR}
   Output base:         ${OUTPUT_BASE}
   Fastpath configs:    ${FASTPATH}
   64K page size:       ${CHANGE_TO_64K}
@@ -366,7 +417,48 @@ Kernel build settings:
   Kernel cmdline:      ${KERNEL_CMDLINE:-<unchanged>}
   Append to version:   ${APPEND_TO_KERNEL_VERSION:-<none>}
   Tuxmake virtualenv:  ${VENV_PATH}
-SUMMARY
+EOF
+}
+
+build_kernel_for_tag() {
+  local tag="$1"
+  local label="$2"
+  local host_kernel="$3"
+  local os_name="$4"
+  local page_size="$5"
+  local tag_display
+  tag_display="$(describe_tag "${tag}")"
+  local kernel_dir
+  kernel_dir="$(determine_kernel_dir "${label}")"
+  local workspace
+  workspace="$(mktemp -d -t kernel-build-XXXXXX)"
+  trap "rm -rf '$workspace'" RETURN
+  local base_config="${workspace}/kernel_base.config"
+  local custom_config="${workspace}/kernel_customizations.config"
+
+  log "[${label}] Preparing build for tag ${tag_display}"
+  clone_kernel_repo "${REPO}" "${BRANCH}" "${tag}" "${kernel_dir}"
+  prepare_kernel_tree "${kernel_dir}"
+  stage_base_config "${base_config}" "${CONFIG_FILE}"
+  write_custom_configs "${custom_config}" "${FASTPATH}" "${CHANGE_TO_64K}" "${tag}"
+  update_extraversion "${kernel_dir}" "${CHANGE_TO_64K}" "${APPEND_TO_KERNEL_VERSION}"
+
+  local kernel_version
+  kernel_version="$(collect_kernel_info "${kernel_dir}")"
+  local output_dir="${OUTPUT_BASE}/${kernel_version}"
+  rm -rf "${output_dir}/build"
+
+  log "[${label}] Host OS: ${os_name} | Running kernel: ${host_kernel} | Page size: ${page_size}"
+  log "[${label}] Building kernel ${kernel_version} -> ${output_dir}"
+
+  run_tuxmake_build "${kernel_dir}" "${base_config}" "${custom_config}" "${output_dir}" "${VENV_PATH}"
+
+  log "[${label}] Build artifacts are located in ${output_dir}"
+
+  if [[ "${KERNEL_INSTALL}" == "true" ]]; then
+    install_kernel_artifacts "${output_dir}" "${kernel_version}" "${KERNEL_CMDLINE}"
+    prompt_reboot
+  fi
 }
 
 main() {
@@ -374,8 +466,9 @@ main() {
     case "$1" in
       --repo) REPO="$2"; shift 2 ;;
       --branch) BRANCH="$2"; shift 2 ;;
-      --tag) TAG="$2"; shift 2 ;;
-      --tag-latest) TAG=""; shift 1 ;;
+      --tag) TAGS+=("$2"); shift 2 ;;
+      --tags) IFS=',' read -r -a tag_list <<<"$2"; TAGS+=("${tag_list[@]}"); shift 2 ;;
+      --tag-latest) TAGS+=(""); shift 1 ;;
       --config-file) CONFIG_FILE="$2"; shift 2 ;;
       --kernel-command-line) KERNEL_CMDLINE="$2"; shift 2 ;;
       --append-to-kernel-version|--append) APPEND_TO_KERNEL_VERSION="$2"; shift 2 ;;
@@ -391,14 +484,22 @@ main() {
     esac
   done
 
+  if (( ${#TAGS[@]} == 0 )); then
+    TAGS+=("${TAG_DEFAULT}")
+  fi
+  TOTAL_BUILDS=${#TAGS[@]}
+
   [[ -n "${REPO}" ]] || fail "Kernel repo (--repo) cannot be empty"
   if [[ -n "${CONFIG_FILE}" && ! -f "${CONFIG_FILE}" ]]; then
     fail "Config file ${CONFIG_FILE} does not exist"
   fi
+  if (( TOTAL_BUILDS > 1 )) && [[ "${KERNEL_INSTALL}" == "true" ]]; then
+    fail "Installing kernels is only supported with a single tag build"
+  fi
 
   summarize_settings
   if [[ "${ASSUME_YES}" != "true" ]]; then
-    read -rp "Proceed with kernel build? (y/N): " resp
+    read -rp "Proceed with kernel build(s)? (y/N): " resp
     [[ "${resp,,}" =~ ^(y|yes)$ ]] || { log "Aborted by user"; exit 0; }
   fi
 
@@ -408,42 +509,37 @@ main() {
 
   install_packages
   ensure_virtualenv
-  clone_kernel_repo
-  prepare_kernel_tree
+  mkdir -p "${OUTPUT_BASE}"
 
-  local base_config custom_config
-  base_config="$(stage_base_config)"
-  custom_config="$(write_custom_configs)"
-  update_extraversion
-
-  local uname_current os_name page_size
-  uname_current="$(uname -r)"
+  local host_kernel os_name page_size
+  host_kernel="$(uname -r)"
   os_name="$(lsb_release -si 2>/dev/null || uname -s)"
   page_size="$(getconf PAGE_SIZE)"
 
-  local kernel_version
-  kernel_version="$(collect_kernel_info)"
-  local output_dir="${OUTPUT_BASE}/${kernel_version}"
-  rm -rf "${output_dir}/build"
-
-  cat <<INFO
-Host information:
-  OS:                  ${os_name}
-  Current kernel:      ${uname_current}
-  Current page size:   ${page_size}
-  Building version:    ${kernel_version}
-  Output directory:    ${output_dir}
-INFO
-
-  run_tuxmake_build "${base_config}" "${custom_config}" "${output_dir}"
-
-  log "Build artifacts are located in ${output_dir}"
-
-  if [[ "${KERNEL_INSTALL}" == "true" ]]; then
-    install_kernel_artifacts "${output_dir}" "${kernel_version}"
-    prompt_reboot
+  if (( TOTAL_BUILDS == 1 )); then
+    local label
+    label="$(build_label "${TAGS[0]}" 1)"
+    build_kernel_for_tag "${TAGS[0]}" "${label}" "${host_kernel}" "${os_name}" "${page_size}"
   else
-    log "Kernel install disabled; skipping artifact installation."
+    local -a job_pids=()
+    local -a labels=()
+    local index=0
+    for tag in "${TAGS[@]}"; do
+      index=$((index + 1))
+      local label
+      label="$(build_label "${tag}" "${index}")"
+      ( build_kernel_for_tag "${tag}" "${label}" "${host_kernel}" "${os_name}" "${page_size}" ) &
+      job_pids+=($!)
+      labels+=("${label}")
+    done
+    local rc=0
+    for i in "${!job_pids[@]}"; do
+      if ! wait "${job_pids[$i]}"; then
+        log "Build ${labels[$i]} failed"
+        rc=1
+      fi
+    done
+    (( rc == 0 )) || fail "One or more kernel builds failed"
   fi
 }
 
