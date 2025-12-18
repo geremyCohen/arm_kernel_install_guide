@@ -7,7 +7,7 @@ REMOTE_DIR=""
 LOCAL_DIR="${HOME}/kernels"
 ASSUME_YES="false"
 declare -a VERSIONS=()
-SSH_FLAGS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+SSH_FLAGS=(-A -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 REQUIRED_FILES=(Image.gz modules.tar.xz)
 
 usage() {
