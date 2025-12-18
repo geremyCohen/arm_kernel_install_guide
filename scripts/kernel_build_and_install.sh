@@ -13,6 +13,7 @@ FASTPATH_DEFAULT="true"
 KERNEL_DIR_DEFAULT="${HOME}/kernels/linux"
 OUTPUT_BASE_DEFAULT="${HOME}/kernels"
 VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
+INCLUDE_BINDEB_PKG_DEFAULT="true"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -26,6 +27,7 @@ KERNEL_DIR="${KERNEL_DIR_DEFAULT}"
 OUTPUT_BASE="${OUTPUT_BASE_DEFAULT}"
 VENV_PATH="${VENV_PATH_DEFAULT}"
 ASSUME_YES="false"
+INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
 declare -a TAGS=()
 TOTAL_BUILDS=0
 
@@ -49,6 +51,7 @@ Options:
   --change-to-64k <bool>           Enable 64K page size (default: false)
   --fastpath <bool>                Apply fastpath configs (default: true)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
+  --exclude-bindeb-pkg             Omit bindeb-pkg target when running tuxmake
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
 
@@ -319,6 +322,10 @@ run_tuxmake_build() {
   local venv_path="$5"
   mkdir -p "${output_dir}"
   log "Building kernel in ${kernel_dir} (output -> ${output_dir})"
+  local -a targets=(kernel modules perf cpupower)
+  if [[ "${INCLUDE_BINDEB_PKG}" == "true" ]]; then
+    targets+=(bindeb-pkg)
+  fi
   # shellcheck source=/dev/null
   source "${venv_path}/bin/activate"
   pushd "${kernel_dir}" >/dev/null
@@ -328,7 +335,7 @@ run_tuxmake_build() {
     --runtime=null \
     --kconfig="${base_config}" \
     --kconfig-add="${custom_config}" \
-    kernel modules perf cpupower bindeb-pkg
+    "${targets[@]}"
   popd >/dev/null
   deactivate
 }
@@ -417,6 +424,7 @@ Kernel build settings:
   Kernel cmdline:      ${KERNEL_CMDLINE:-<unchanged>}
   Append to version:   ${APPEND_TO_KERNEL_VERSION:-<none>}
   Tuxmake virtualenv:  ${VENV_PATH}
+  bindeb-pkg target:   ${INCLUDE_BINDEB_PKG}
 EOF
 }
 
@@ -478,6 +486,7 @@ main() {
       --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
       --output-base) OUTPUT_BASE="$2"; shift 2 ;;
       --venv-path) VENV_PATH="$2"; shift 2 ;;
+      --exclude-bindeb-pkg) INCLUDE_BINDEB_PKG="false"; shift 1 ;;
       --assume-yes) ASSUME_YES="true"; shift 1 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
