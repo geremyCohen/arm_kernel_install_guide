@@ -253,14 +253,31 @@ prepare_kernel_tree() {
   popd >/dev/null
 }
 
+resolve_base_config_source() {
+  if [[ -n "${CONFIG_FILE}" ]]; then
+    echo "${CONFIG_FILE}"
+  else
+    local default="/boot/config-$(uname -r)"
+    [[ -f "${default}" ]] || fail "Default config ${default} not found; specify --config-file"
+    echo "${default}"
+  fi
+}
+
 stage_base_config() {
   local dest="$1"
   local source_config="$2"
-  if [[ -n "${source_config}" ]]; then
-    cp "${source_config}" "${dest}"
-  else
-    cp "/boot/config-$(uname -r)" "${dest}"
-  fi
+  cp "${source_config}" "${dest}"
+}
+
+preserve_source_config() {
+  local source_config="$1"
+  local output_dir="$2"
+  local host_kernel="$3"
+  local stock_dir="${OUTPUT_BASE}/stock-configs"
+  mkdir -p "${output_dir}" "${stock_dir}"
+  cp -f "${source_config}" "${output_dir}/config.stock"
+  local sanitized_kernel="${host_kernel//\//-}"
+  cp -f "${source_config}" "${stock_dir}/config-${sanitized_kernel}"
 }
 
 write_custom_configs() {
@@ -443,17 +460,20 @@ build_kernel_for_tag() {
   trap "rm -rf '$workspace'" RETURN
   local base_config="${workspace}/kernel_base.config"
   local custom_config="${workspace}/kernel_customizations.config"
+  local base_config_source
+  base_config_source="$(resolve_base_config_source)"
 
   log "[${label}] Preparing build for tag ${tag_display}"
   clone_kernel_repo "${REPO}" "${BRANCH}" "${tag}" "${kernel_dir}"
   prepare_kernel_tree "${kernel_dir}"
-  stage_base_config "${base_config}" "${CONFIG_FILE}"
+  stage_base_config "${base_config}" "${base_config_source}"
   write_custom_configs "${custom_config}" "${FASTPATH}" "${CHANGE_TO_64K}" "${tag}"
   update_extraversion "${kernel_dir}" "${CHANGE_TO_64K}" "${APPEND_TO_KERNEL_VERSION}"
 
   local kernel_version
   kernel_version="$(collect_kernel_info "${kernel_dir}")"
   local output_dir="${OUTPUT_BASE}/${kernel_version}"
+  preserve_source_config "${base_config_source}" "${output_dir}" "${host_kernel}"
   rm -rf "${output_dir}/build"
 
   log "[${label}] Host OS: ${os_name} | Running kernel: ${host_kernel} | Page size: ${page_size}"

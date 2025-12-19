@@ -9,6 +9,7 @@ ASSUME_YES="false"
 declare -a VERSIONS=()
 SSH_FLAGS=(-A -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 REQUIRED_FILES=(Image.gz modules.tar.xz)
+OPTIONAL_FILES=(config.stock)
 
 usage() {
   cat <<'USAGE'
@@ -151,6 +152,21 @@ copy_version() {
     log "Copying ${version}/${file}"
     ssh_cmd "test -f ${remote_file@Q} || exit 3"
     scp_cmd "${SSH_USER}@${HOST}:${remote_file}" "${local_file}"
+  done
+
+  for file in "${OPTIONAL_FILES[@]}"; do
+    local remote_file="${remote_base}/${file}"
+    local local_file="${local_base}/${file}"
+    if ssh_cmd "test -f ${remote_file@Q}"; then
+      if [[ -f "${local_file}" ]]; then
+        log "Skipping existing optional ${version}/${file}"
+        continue
+      fi
+      log "Copying optional ${version}/${file}"
+      scp_cmd "${SSH_USER}@${HOST}:${remote_file}" "${local_file}"
+    else
+      log "Optional file ${version}/${file} not found on remote; skipping"
+    fi
   done
 }
 
