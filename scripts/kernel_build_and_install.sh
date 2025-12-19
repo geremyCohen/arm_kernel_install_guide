@@ -51,7 +51,7 @@ Options:
   --change-to-64k <bool>           Enable 64K page size (default: false)
   --fastpath <bool>                Apply fastpath configs (default: true)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
-  --exclude-bindeb-pkg             Omit bindeb-pkg target when running tuxmake
+  --exclude-bindeb-pkg             Omit bindeb-pkg target when running tuxmake (default: include)
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
 
