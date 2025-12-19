@@ -14,6 +14,7 @@ KERNEL_DIR_DEFAULT="${HOME}/kernels/linux"
 OUTPUT_BASE_DEFAULT="${HOME}/kernels"
 VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
 INCLUDE_BINDEB_PKG_DEFAULT="false"
+DEMO_FASTPATH_BUILDS_DEFAULT="false"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -28,6 +29,7 @@ OUTPUT_BASE="${OUTPUT_BASE_DEFAULT}"
 VENV_PATH="${VENV_PATH_DEFAULT}"
 ASSUME_YES="false"
 INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
+DEMO_FASTPATH_BUILDS="${DEMO_FASTPATH_BUILDS_DEFAULT}"
 declare -a TAGS=()
 TOTAL_BUILDS=0
 
@@ -52,6 +54,7 @@ Options:
   --fastpath <bool>                Apply fastpath configs (default: true)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
+  --demo-fastpath-builds           Shortcut for --tags v6.18.1,v6.19-rc1 --assume-yes
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
 
@@ -507,11 +510,17 @@ main() {
       --output-base) OUTPUT_BASE="$2"; shift 2 ;;
       --venv-path) VENV_PATH="$2"; shift 2 ;;
       --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
+      --demo-fastpath-builds) DEMO_FASTPATH_BUILDS="true"; shift 1 ;;
       --assume-yes) ASSUME_YES="true"; shift 1 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
     esac
   done
+
+  if [[ "${DEMO_FASTPATH_BUILDS}" == "true" ]]; then
+    TAGS=("v6.18.1" "v6.19-rc1")
+    ASSUME_YES="true"
+  fi
 
   if (( ${#TAGS[@]} == 0 )); then
     TAGS+=("${TAG_DEFAULT}")
