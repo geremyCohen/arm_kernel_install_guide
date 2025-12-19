@@ -13,7 +13,7 @@ FASTPATH_DEFAULT="true"
 KERNEL_DIR_DEFAULT="${HOME}/kernels/linux"
 OUTPUT_BASE_DEFAULT="${HOME}/kernels"
 VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
-INCLUDE_BINDEB_PKG_DEFAULT="true"
+INCLUDE_BINDEB_PKG_DEFAULT="false"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -51,7 +51,7 @@ Options:
   --change-to-64k <bool>           Enable 64K page size (default: false)
   --fastpath <bool>                Apply fastpath configs (default: true)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
-  --exclude-bindeb-pkg             Omit bindeb-pkg target when running tuxmake (default: include)
+  --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
 
@@ -506,7 +506,7 @@ main() {
       --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
       --output-base) OUTPUT_BASE="$2"; shift 2 ;;
       --venv-path) VENV_PATH="$2"; shift 2 ;;
-      --exclude-bindeb-pkg) INCLUDE_BINDEB_PKG="false"; shift 1 ;;
+      --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
       --assume-yes) ASSUME_YES="true"; shift 1 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
