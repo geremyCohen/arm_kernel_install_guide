@@ -1,0 +1,26 @@
+sut:
+  name: fastpath_t1
+  connection:
+    method: SSH
+    params:
+      user: fpuser
+      host: 172.31.100.10
+swprofiles:
+  - name: a_6.17.12
+    kernel: /home/ubuntu/kernels/6.17.12-ubuntu/Image.gz
+    modules: /home/ubuntu/kernels/6.17.12-ubuntu/modules.tar.xz
+    cmdline:
+      - thp_anon=64K:never;2M:madvise
+  - name: b_6.18.1
+    kernel: /home/ubuntu/kernels/6.18.1-ubuntu/Image.gz
+    modules: /home/ubuntu/kernels/6.18.1-ubuntu/modules.tar.xz
+    cmdline:
+      - thp_anon=64K:always;2M:madvise
+benchmarks:
+  - include: speedometer/v2.1.yaml
+defaults:
+  benchmark:
+    warmups: 0
+    repeats: 1
+    sessions: 1
+    timeout: 1h
