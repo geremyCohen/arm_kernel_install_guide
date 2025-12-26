@@ -9,12 +9,13 @@ KERNEL_CMDLINE_DEFAULT=""
 APPEND_TO_KERNEL_VERSION_DEFAULT=""
 KERNEL_INSTALL_DEFAULT="false"
 CHANGE_TO_64K_DEFAULT="false"
-FASTPATH_DEFAULT="true"
+FASTPATH_DEFAULT="false"
 KERNEL_DIR_DEFAULT="${HOME}/kernels/linux"
 OUTPUT_BASE_DEFAULT="${HOME}/kernels"
 VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
 INCLUDE_BINDEB_PKG_DEFAULT="false"
 DEMO_FASTPATH_BUILDS_DEFAULT="false"
+REQUIRES_DOCKER_DEFAULT="false"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -22,6 +23,8 @@ CONFIG_FILE="${CONFIG_FILE_DEFAULT}"
 KERNEL_CMDLINE="${KERNEL_CMDLINE_DEFAULT}"
 APPEND_TO_KERNEL_VERSION="${APPEND_TO_KERNEL_VERSION_DEFAULT}"
 KERNEL_INSTALL="${KERNEL_INSTALL_DEFAULT}"
+KERNEL_INSTALL_OPTIONAL_TAG=""
+KERNEL_INSTALL_TARGET=""
 CHANGE_TO_64K="${CHANGE_TO_64K_DEFAULT}"
 FASTPATH="${FASTPATH_DEFAULT}"
 KERNEL_DIR="${KERNEL_DIR_DEFAULT}"
@@ -30,6 +33,7 @@ VENV_PATH="${VENV_PATH_DEFAULT}"
 ASSUME_YES="false"
 INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
 DEMO_FASTPATH_BUILDS="${DEMO_FASTPATH_BUILDS_DEFAULT}"
+REQUIRES_DOCKER="${REQUIRES_DOCKER_DEFAULT}"
 declare -a TAGS=()
 TOTAL_BUILDS=0
 
@@ -49,9 +53,9 @@ Options:
   --append <str>                   Alias for --append-to-kernel-version
   --kernel-dir <path>              Base directory for kernel repo (default: ~/kernels/linux)
   --output-base <path>             Directory where build outputs go (default: ~/kernels)
-  --kernel-install <bool>          Install kernel artifacts after build (default: false)
+  --kernel-install [tag|bool]      Install kernel (multi-tag requires tag name)
   --change-to-64k <bool>           Enable 64K page size (default: false)
-  --fastpath <bool>                Apply fastpath configs (default: true)
+  --fastpath <bool>                Apply fastpath configs (default: false)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --demo-fastpath-builds           Shortcut for --tags v6.18.1,v6.19-rc1 --assume-yes
@@ -210,8 +214,12 @@ install_packages() {
     pkg-config libtraceevent-dev libtracefs-dev libdw-dev systemtap-sdt-dev
     libunwind-dev libslang2-dev libperl-dev libcapstone-dev libnuma-dev
     libcap-dev libpci-dev libbabeltrace-dev libpfm4-dev libbfd-dev python3-dev
-    liblzma-dev docker.io pipx gettext llvm-dev lsb-release
+    liblzma-dev pipx gettext llvm-dev lsb-release initramfs-tools
   )
+
+  if [[ "${REQUIRES_DOCKER}" == "true" ]]; then
+    packages+=("docker.io")
+  fi
 
   log "Installing kernel build dependencies"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
@@ -368,11 +376,15 @@ install_kernel_artifacts() {
   sudo cp "${output_dir}/config" "/boot/config-${kernel_version}"
   sudo cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
   sudo rm -rf "/lib/modules/${kernel_version}"
-  sudo tar -C / -xf "${output_dir}/modules.tar.xz" --strip-components=2
+  sudo tar -C /lib -xf "${output_dir}/modules.tar.xz" --strip-components=1
+  sudo depmod "${kernel_version}"
   sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
   sudo tar -C /usr/bin -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 ./usr/bin/cpupower
   sudo tar -C /usr/lib -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 --wildcards ./usr/lib/libcpupower.so*
   sudo ldconfig
+  log "Generating initramfs for ${kernel_version}"
+  sudo update-initramfs -c -k "${kernel_version}"
+  [[ -f "/boot/initrd.img-${kernel_version}" ]] || fail "Initramfs /boot/initrd.img-${kernel_version} was not created"
   if [[ -n "${kernel_cmdline}" ]]; then
     sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
   fi
@@ -441,6 +453,7 @@ Kernel build settings:
   Fastpath configs:    ${FASTPATH}
   64K page size:       ${CHANGE_TO_64K}
   Kernel install:      ${KERNEL_INSTALL}
+  Install target:      ${KERNEL_INSTALL_TARGET:-<none>}
   Kernel cmdline:      ${KERNEL_CMDLINE:-<unchanged>}
   Append to version:   ${APPEND_TO_KERNEL_VERSION:-<none>}
   Tuxmake virtualenv:  ${VENV_PATH}
@@ -486,7 +499,12 @@ build_kernel_for_tag() {
 
   log "[${label}] Build artifacts are located in ${output_dir}"
 
-  if [[ "${KERNEL_INSTALL}" == "true" ]]; then
+  local install_this_tag="false"
+  if [[ "${KERNEL_INSTALL}" == "true" && "${tag}" == "${KERNEL_INSTALL_TARGET}" ]]; then
+    install_this_tag="true"
+  fi
+
+  if [[ "${install_this_tag}" == "true" ]]; then
     install_kernel_artifacts "${output_dir}" "${kernel_version}" "${KERNEL_CMDLINE}"
     prompt_reboot
   fi
@@ -503,14 +521,49 @@ main() {
       --config-file) CONFIG_FILE="$2"; shift 2 ;;
       --kernel-command-line) KERNEL_CMDLINE="$2"; shift 2 ;;
       --append-to-kernel-version|--append) APPEND_TO_KERNEL_VERSION="$2"; shift 2 ;;
-      --kernel-install) KERNEL_INSTALL="$(parse_bool "$2")"; shift 2 ;;
+      --kernel-install)
+        next_kernel_install_arg="${2-}"
+        if [[ $# -gt 1 && "${next_kernel_install_arg}" != --* ]]; then
+          case "${next_kernel_install_arg,,}" in
+            y|yes|true|1)
+              KERNEL_INSTALL="true"
+              KERNEL_INSTALL_OPTIONAL_TAG=""
+              shift 2
+              ;;
+            n|no|false|0)
+              KERNEL_INSTALL="false"
+              KERNEL_INSTALL_OPTIONAL_TAG=""
+              shift 2
+              ;;
+            *)
+              KERNEL_INSTALL="true"
+              KERNEL_INSTALL_OPTIONAL_TAG="${next_kernel_install_arg}"
+              shift 2
+              ;;
+          esac
+        else
+          KERNEL_INSTALL="true"
+          KERNEL_INSTALL_OPTIONAL_TAG=""
+          shift 1
+        fi
+        ;;
       --change-to-64k) CHANGE_TO_64K="$(parse_bool "$2")"; shift 2 ;;
-      --fastpath) FASTPATH="$(parse_bool "$2")"; shift 2 ;;
+      --fastpath)
+        FASTPATH="$(parse_bool "$2")"
+        if [[ "${FASTPATH}" == "true" ]]; then
+          REQUIRES_DOCKER="true"
+        fi
+        shift 2
+        ;;
       --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
       --output-base) OUTPUT_BASE="$2"; shift 2 ;;
       --venv-path) VENV_PATH="$2"; shift 2 ;;
       --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
-      --demo-fastpath-builds) DEMO_FASTPATH_BUILDS="true"; shift 1 ;;
+      --demo-fastpath-builds)
+        DEMO_FASTPATH_BUILDS="true"
+        FASTPATH="true"
+        shift 1
+        ;;
       --assume-yes) ASSUME_YES="true"; shift 1 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
@@ -520,6 +573,13 @@ main() {
   if [[ "${DEMO_FASTPATH_BUILDS}" == "true" ]]; then
     TAGS=("v6.18.1" "v6.19-rc1")
     ASSUME_YES="true"
+    FASTPATH="true"
+  fi
+
+  if [[ "${FASTPATH}" == "true" ]]; then
+    REQUIRES_DOCKER="true"
+  else
+    REQUIRES_DOCKER="false"
   fi
 
   if (( ${#TAGS[@]} == 0 )); then
@@ -531,8 +591,40 @@ main() {
   if [[ -n "${CONFIG_FILE}" && ! -f "${CONFIG_FILE}" ]]; then
     fail "Config file ${CONFIG_FILE} does not exist"
   fi
-  if (( TOTAL_BUILDS > 1 )) && [[ "${KERNEL_INSTALL}" == "true" ]]; then
-    fail "Installing kernels is only supported with a single tag build"
+  if [[ "${KERNEL_INSTALL}" == "true" ]]; then
+    if (( TOTAL_BUILDS == 1 )); then
+      local sole_tag="${TAGS[0]}"
+      if [[ -n "${KERNEL_INSTALL_OPTIONAL_TAG}" && "${KERNEL_INSTALL_OPTIONAL_TAG}" != "${sole_tag}" ]]; then
+        fail "--kernel-install was set to install '${KERNEL_INSTALL_OPTIONAL_TAG}', but the build only includes '${sole_tag}'"
+      fi
+      KERNEL_INSTALL_TARGET="${sole_tag}"
+    else
+      if [[ -z "${KERNEL_INSTALL_OPTIONAL_TAG}" ]]; then
+        fail "When building multiple tags, --kernel-install must be followed by one of the requested tags"
+      fi
+      local match="false"
+      for tag in "${TAGS[@]}"; do
+        if [[ "${tag}" == "${KERNEL_INSTALL_OPTIONAL_TAG}" ]]; then
+          match="true"
+          break
+        fi
+      done
+      if [[ "${match}" != "true" ]]; then
+        fail "Kernel install target '${KERNEL_INSTALL_OPTIONAL_TAG}' was not included in the --tag/--tags list"
+      fi
+      KERNEL_INSTALL_TARGET="${KERNEL_INSTALL_OPTIONAL_TAG}"
+    fi
+  fi
+
+  local -a BUILD_TAGS=("${TAGS[@]}")
+  if [[ "${KERNEL_INSTALL}" == "true" && TOTAL_BUILDS > 1 ]]; then
+    BUILD_TAGS=()
+    for tag in "${TAGS[@]}"; do
+      if [[ "${tag}" != "${KERNEL_INSTALL_TARGET}" ]]; then
+        BUILD_TAGS+=("${tag}")
+      fi
+    done
+    BUILD_TAGS+=("${KERNEL_INSTALL_TARGET}")
   fi
 
   summarize_settings
@@ -554,15 +646,19 @@ main() {
   os_name="$(lsb_release -si 2>/dev/null || uname -s)"
   page_size="$(getconf PAGE_SIZE)"
 
-  if (( TOTAL_BUILDS == 1 )); then
-    local label
-    label="$(build_label "${TAGS[0]}" 1)"
-    build_kernel_for_tag "${TAGS[0]}" "${label}" "${host_kernel}" "${os_name}" "${page_size}"
+  if (( TOTAL_BUILDS == 1 )) || [[ "${KERNEL_INSTALL}" == "true" ]]; then
+    local index=0
+    for tag in "${BUILD_TAGS[@]}"; do
+      index=$((index + 1))
+      local label
+      label="$(build_label "${tag}" "${index}")"
+      build_kernel_for_tag "${tag}" "${label}" "${host_kernel}" "${os_name}" "${page_size}"
+    done
   else
     local -a job_pids=()
     local -a labels=()
     local index=0
-    for tag in "${TAGS[@]}"; do
+    for tag in "${BUILD_TAGS[@]}"; do
       index=$((index + 1))
       local label
       label="$(build_label "${tag}" "${index}")"
