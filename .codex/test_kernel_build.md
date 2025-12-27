@@ -32,3 +32,7 @@ Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for ev
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --kernel-install # Expect immediate failure: when more than one tag is requested, the install flag must name the tag to install.
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --kernel-install v6.20.0 # Expect immediate failure: requested install tag must match one of the tags passed to --tag/--tags.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat --assume-yes # After building but skipping install, reuse the saved flat artifacts; approve reboot prompt and verify uname -r matches the installed kernel.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format deb --assume-yes # After building with --include-bindeb-pkg, install from the generated .deb files, reboot, and confirm uname -r plus dpkg -l show the new kernel packages.

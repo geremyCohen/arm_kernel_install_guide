@@ -16,6 +16,7 @@ VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
 INCLUDE_BINDEB_PKG_DEFAULT="false"
 DEMO_FASTPATH_BUILDS_DEFAULT="false"
 REQUIRES_DOCKER_DEFAULT="false"
+INSTALL_FORMAT_DEFAULT="auto"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -34,6 +35,8 @@ ASSUME_YES="false"
 INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
 DEMO_FASTPATH_BUILDS="${DEMO_FASTPATH_BUILDS_DEFAULT}"
 REQUIRES_DOCKER="${REQUIRES_DOCKER_DEFAULT}"
+INSTALL_FROM_PATH=""
+INSTALL_FORMAT="${INSTALL_FORMAT_DEFAULT}"
 declare -a TAGS=()
 TOTAL_BUILDS=0
 
@@ -58,6 +61,8 @@ Options:
   --fastpath <bool>                Apply fastpath configs (default: false)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
+  --install-from <dir>              Install an existing kernel from artifacts in <dir>
+  --install-format <flat|deb|auto>  Force interpretation of --install-from artifacts (default: auto)
   --demo-fastpath-builds           Shortcut for --tags v6.18.1,v6.19-rc1 --assume-yes
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
@@ -368,6 +373,124 @@ run_tuxmake_build() {
   deactivate
 }
 
+save_kernel_metadata() {
+  local output_dir="$1"
+  local kernel_version="$2"
+  printf '%s\n' "${kernel_version}" > "${output_dir}/.kernel-version"
+}
+
+read_kernel_version_from_dir() {
+  local dir="$1"
+  if [[ -f "${dir}/.kernel-version" ]]; then
+    local stored
+    stored="$(<"${dir}/.kernel-version")"
+    if [[ -n "${stored}" ]]; then
+      echo "${stored}"
+      return
+    fi
+  fi
+  if [[ -f "${dir}/config" ]]; then
+    local from_config
+    from_config="$(awk '/^# Linux/ {print $3; exit}' "${dir}/config" | tr -d '[:space:]')" || true
+    if [[ -n "${from_config}" ]]; then
+      echo "${from_config}"
+      return
+    fi
+  fi
+  basename "${dir}"
+}
+
+detect_install_format() {
+  local dir="$1"
+  local preferred="$2"
+  local fmt="${preferred,,}"
+  case "${fmt}" in
+    flat|deb)
+      echo "${fmt}"
+      ;;
+    auto)
+      if find "${dir}" -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q .; then
+        echo "deb"
+        return
+      fi
+      if [[ -f "${dir}/Image.gz" && -f "${dir}/modules.tar.xz" ]]; then
+        echo "flat"
+        return
+      fi
+      fail "Could not auto-detect artifact format inside ${dir}"
+      ;;
+    *)
+      fail "Unknown install format '${preferred}'. Use flat, deb, or auto."
+      ;;
+  esac
+}
+
+apply_kernel_cmdline() {
+  local kernel_cmdline="$1"
+  if [[ -n "${kernel_cmdline}" ]]; then
+    sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
+  fi
+  sudo update-grub || true
+}
+
+install_kernel_from_debs() {
+  local dir="$1"
+  local kernel_cmdline="$2"
+  log "Installing kernel from DEB packages in ${dir}"
+  local -a debs=()
+  while IFS= read -r -d '' deb; do
+    debs+=("$deb")
+  done < <(find "${dir}" -maxdepth 1 -type f -name '*.deb' -print0 | LC_ALL=C sort -z)
+  (( ${#debs[@]} > 0 )) || fail "No .deb packages found in ${dir}"
+  sudo dpkg -i "${debs[@]}"
+  apply_kernel_cmdline "${kernel_cmdline}"
+}
+
+detect_kernel_version_from_debs() {
+  local dir="$1"
+  local fallback="$2"
+  local image_deb
+  image_deb="$(find "${dir}" -maxdepth 1 -type f -name 'linux-image-*.deb' | LC_ALL=C sort | head -n1 || true)"
+  if [[ -n "${image_deb}" ]]; then
+    local base
+    base="$(basename "${image_deb}")"
+    base="${base#linux-image-}"
+    base="${base%%_*}"
+    echo "${base}"
+    return
+  fi
+  echo "${fallback}"
+}
+
+install_prebuilt_kernel() {
+  local source_dir="$1"
+  local preferred_format="$2"
+  local kernel_cmdline="$3"
+  [[ -d "${source_dir}" ]] || fail "Install source ${source_dir} does not exist"
+
+  local format
+  format="$(detect_install_format "${source_dir}" "${preferred_format}")"
+  local kernel_version
+  kernel_version="$(read_kernel_version_from_dir "${source_dir}")"
+  [[ -n "${kernel_version}" ]] || fail "Unable to determine kernel version from ${source_dir}"
+
+  case "${format}" in
+    flat)
+      [[ -f "${source_dir}/Image.gz" ]] || fail "Missing Image.gz in ${source_dir}"
+      [[ -f "${source_dir}/modules.tar.xz" ]] || fail "Missing modules.tar.xz in ${source_dir}"
+      [[ -f "${source_dir}/config" ]] || fail "Missing config in ${source_dir}"
+      install_kernel_artifacts "${source_dir}" "${kernel_version}" "${kernel_cmdline}"
+      ;;
+    deb)
+      kernel_version="$(detect_kernel_version_from_debs "${source_dir}" "${kernel_version}")"
+      install_kernel_from_debs "${source_dir}" "${kernel_cmdline}"
+      ;;
+  esac
+
+  log "Kernel ${kernel_version} installation complete"
+  prompt_reboot
+}
+
 install_kernel_artifacts() {
   local output_dir="$1"
   local kernel_version="$2"
@@ -378,17 +501,18 @@ install_kernel_artifacts() {
   sudo rm -rf "/lib/modules/${kernel_version}"
   sudo tar -C /lib -xf "${output_dir}/modules.tar.xz" --strip-components=1
   sudo depmod "${kernel_version}"
-  sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
-  sudo tar -C /usr/bin -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 ./usr/bin/cpupower
-  sudo tar -C /usr/lib -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 --wildcards ./usr/lib/libcpupower.so*
+  if [[ -f "${output_dir}/perf.tar.xz" ]]; then
+    sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
+  fi
+  if [[ -f "${output_dir}/cpupower.tar.xz" ]]; then
+    sudo tar -C /usr/bin -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 ./usr/bin/cpupower
+    sudo tar -C /usr/lib -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 --wildcards ./usr/lib/libcpupower.so*
+  fi
   sudo ldconfig
   log "Generating initramfs for ${kernel_version}"
   sudo update-initramfs -c -k "${kernel_version}"
   [[ -f "/boot/initrd.img-${kernel_version}" ]] || fail "Initramfs /boot/initrd.img-${kernel_version} was not created"
-  if [[ -n "${kernel_cmdline}" ]]; then
-    sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
-  fi
-  sudo update-grub || true
+  apply_kernel_cmdline "${kernel_cmdline}"
 }
 
 prompt_reboot() {
@@ -461,6 +585,15 @@ Kernel build settings:
 EOF
 }
 
+summarize_install_from() {
+  cat <<EOF
+Prebuilt kernel install settings:
+  Source directory:   ${INSTALL_FROM_PATH}
+  Artifact format:    ${INSTALL_FORMAT}
+  Kernel cmdline:     ${KERNEL_CMDLINE:-<unchanged>}
+EOF
+}
+
 build_kernel_for_tag() {
   local tag="$1"
   local label="$2"
@@ -497,6 +630,7 @@ build_kernel_for_tag() {
 
   run_tuxmake_build "${kernel_dir}" "${base_config}" "${custom_config}" "${output_dir}" "${VENV_PATH}"
 
+  save_kernel_metadata "${output_dir}" "${kernel_version}"
   log "[${label}] Build artifacts are located in ${output_dir}"
 
   local install_this_tag="false"
@@ -559,6 +693,8 @@ main() {
       --output-base) OUTPUT_BASE="$2"; shift 2 ;;
       --venv-path) VENV_PATH="$2"; shift 2 ;;
       --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
+      --install-from) INSTALL_FROM_PATH="$2"; shift 2 ;;
+      --install-format) INSTALL_FORMAT="$2"; shift 2 ;;
       --demo-fastpath-builds)
         DEMO_FASTPATH_BUILDS="true"
         FASTPATH="true"
@@ -580,6 +716,26 @@ main() {
     REQUIRES_DOCKER="true"
   else
     REQUIRES_DOCKER="false"
+  fi
+
+  if [[ -n "${INSTALL_FROM_PATH}" ]]; then
+    if [[ "${KERNEL_INSTALL}" == "true" || -n "${KERNEL_INSTALL_OPTIONAL_TAG}" ]]; then
+      fail "--install-from cannot be combined with --kernel-install"
+    fi
+    INSTALL_FROM_PATH="$(readlink -f "${INSTALL_FROM_PATH}")"
+    [[ -d "${INSTALL_FROM_PATH}" ]] || fail "Install source ${INSTALL_FROM_PATH} does not exist"
+
+    summarize_install_from
+    if [[ "${ASSUME_YES}" != "true" ]]; then
+      read -rp "Proceed with kernel installation? (y/N): " resp
+      [[ "${resp,,}" =~ ^(y|yes)$ ]] || { log "Aborted by user"; exit 0; }
+    fi
+
+    require_cmd sudo
+    require_cmd dpkg
+    require_cmd tar
+    install_prebuilt_kernel "${INSTALL_FROM_PATH}" "${INSTALL_FORMAT}" "${KERNEL_CMDLINE}"
+    exit 0
   fi
 
   if (( ${#TAGS[@]} == 0 )); then
