@@ -15,6 +15,7 @@ OUTPUT_BASE_DEFAULT="${HOME}/kernels"
 VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
 INCLUDE_BINDEB_PKG_DEFAULT="false"
 DEMO_FASTPATH_BUILDS_DEFAULT="false"
+DEMO_DEFAULT_BUILD_DEFAULT="false"
 REQUIRES_DOCKER_DEFAULT="false"
 INSTALL_FORMAT_DEFAULT="auto"
 
@@ -34,6 +35,7 @@ VENV_PATH="${VENV_PATH_DEFAULT}"
 ASSUME_YES="false"
 INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
 DEMO_FASTPATH_BUILDS="${DEMO_FASTPATH_BUILDS_DEFAULT}"
+DEMO_DEFAULT_BUILD="${DEMO_DEFAULT_BUILD_DEFAULT}"
 REQUIRES_DOCKER="${REQUIRES_DOCKER_DEFAULT}"
 INSTALL_FROM_PATH=""
 INSTALL_FORMAT="${INSTALL_FORMAT_DEFAULT}"
@@ -63,7 +65,8 @@ Options:
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --install-from <dir>              Install an existing kernel from artifacts in <dir>
   --install-format <flat|deb|auto>  Force interpretation of --install-from artifacts (default: auto)
-  --demo-fastpath-builds           Shortcut for --tags v6.18.1,v6.19-rc1 --assume-yes
+  --demo-default-build             Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath false --assume-yes
+  --demo-fastpath-build            Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath true --assume-yes
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
 
@@ -695,7 +698,11 @@ main() {
       --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
       --install-from) INSTALL_FROM_PATH="$2"; shift 2 ;;
       --install-format) INSTALL_FORMAT="$2"; shift 2 ;;
-      --demo-fastpath-builds)
+      --demo-default-build)
+        DEMO_DEFAULT_BUILD="true"
+        shift 1
+        ;;
+      --demo-fastpath-build)
         DEMO_FASTPATH_BUILDS="true"
         FASTPATH="true"
         shift 1
@@ -705,6 +712,16 @@ main() {
       *) fail "Unknown argument: $1" ;;
     esac
   done
+
+  if [[ "${DEMO_DEFAULT_BUILD}" == "true" && "${DEMO_FASTPATH_BUILDS}" == "true" ]]; then
+    fail "--demo-default-build and --demo-fastpath-build cannot be used together"
+  fi
+
+  if [[ "${DEMO_DEFAULT_BUILD}" == "true" ]]; then
+    TAGS=("v6.18.1" "v6.19-rc1")
+    ASSUME_YES="true"
+    FASTPATH="false"
+  fi
 
   if [[ "${DEMO_FASTPATH_BUILDS}" == "true" ]]; then
     TAGS=("v6.18.1" "v6.19-rc1")
