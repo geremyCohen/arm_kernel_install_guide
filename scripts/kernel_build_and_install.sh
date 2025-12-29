@@ -65,7 +65,7 @@ Options:
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --install-from <dir>              Install an existing kernel from artifacts in <dir>
   --install-format <flat|deb|auto>  Force interpretation of --install-from artifacts (default: auto)
-  --demo-default-build             Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath false --assume-yes
+  --demo-default-build             Shortcut for --tags v6.18.1 --fastpath false --assume-yes
   --demo-fastpath-build            Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath true --assume-yes
   --assume-yes                     Do not prompt before starting
   -h, --help                       Show this help message
@@ -718,7 +718,7 @@ main() {
   fi
 
   if [[ "${DEMO_DEFAULT_BUILD}" == "true" ]]; then
-    TAGS=("v6.18.1" "v6.19-rc1")
+    TAGS=("v6.18.1")
     ASSUME_YES="true"
     FASTPATH="false"
   fi
