@@ -5,7 +5,7 @@ Use the multi-kernel build script to validate concurrent and single builds on a 
 Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for every requested target and that artifacts land under ~/kernels/<kernel_version>.
 
 
-./scripts/kernel_build_and_install.sh --demo-default-build # verify two-tag build without fastpath and ensure docker is NOT installed.
+./scripts/kernel_build_and_install.sh --demo-default-build # verify single-tag (v6.18.1) build without fastpath and ensure docker is NOT installed.
 
 ./scripts/kernel_build_and_install.sh --demo-fastpath-build # verify two-tag build with fastpath configs and confirm docker IS installed.
 
