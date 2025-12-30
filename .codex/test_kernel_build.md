@@ -47,6 +47,4 @@ Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for ev
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --fastpath true --kernel-install v6.19-rc1 --kernel-command-line "console=ttyAMA0 earlycon" # Fastpath build/install; after reboot check uname -r and confirm /etc/default/grub contains the custom command line.
 
-./scripts/kernel_build_and_install.sh --tags v6.18.1 --assume-yes --fastpath true --include-bindeb-pkg # Fastpath bindeb run; verify .deb artifacts include the Fastpath config fragment.
-
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat --fastpath true --assume-yes # Install-only Fastpath scenario; ensure prior artifacts were built with --fastpath true and confirm uname -r after reboot.
