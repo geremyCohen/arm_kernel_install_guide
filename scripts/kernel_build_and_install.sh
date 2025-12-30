@@ -519,6 +519,12 @@ install_kernel_artifacts() {
 }
 
 prompt_reboot() {
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    log "Kernel installed. --assume-yes supplied, rebooting automatically."
+    sudo reboot
+    return
+  fi
+
   read -rp "Kernel installed. Reboot now? (y/N): " reboot_resp
   if [[ "${reboot_resp,,}" =~ ^(y|yes)$ ]]; then
     log "Rebooting..."

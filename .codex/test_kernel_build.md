@@ -9,6 +9,8 @@ Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for ev
 
 ./scripts/kernel_build_and_install.sh --demo-fastpath-build # verify two-tag build with fastpath configs and confirm docker IS installed.
 
+./scripts/kernel_build_and_install.sh --tags v6.19-rc1 --assume-yes # Build a single RC tag; confirm artifacts land under ~/kernels/<rc_version> and docker.io remains uninstalled.
+
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --include-bindeb-pkg # Verify DEB packages are created.
 
 ./scripts/kernel_build_and_install.sh --tags v6.14,v6.18.1 --assume-yes
@@ -38,3 +40,13 @@ Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for ev
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat --assume-yes # After building but skipping install, reuse the saved flat artifacts; approve reboot prompt and verify uname -r matches the installed kernel.
 
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format deb --assume-yes # After building with --include-bindeb-pkg, install from the generated .deb files, reboot, and confirm uname -r plus dpkg -l show the new kernel packages.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --assume-yes # Auto-detect install format; ensure the directory already contains either flat artifacts or .deb packages, then reboot and verify uname -r matches the installed kernel.
+
+./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --fastpath true # Explicit Fastpath build; confirm docker.io is installed and both tag directories contain Fastpath configs.
+
+./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --assume-yes --fastpath true --kernel-install v6.19-rc1 --kernel-command-line "console=ttyAMA0 earlycon" # Fastpath build/install; after reboot check uname -r and confirm /etc/default/grub contains the custom command line.
+
+./scripts/kernel_build_and_install.sh --tags v6.18.1 --assume-yes --fastpath true --include-bindeb-pkg # Fastpath bindeb run; verify .deb artifacts include the Fastpath config fragment.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat --fastpath true --assume-yes # Install-only Fastpath scenario; ensure prior artifacts were built with --fastpath true and confirm uname -r after reboot.
