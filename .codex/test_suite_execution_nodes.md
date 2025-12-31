@@ -13,6 +13,7 @@ Use this prompt whenever you need to rebuild context for the `qa_1229` end-to-en
    - Before running a test, `rm -rf ~/kernels && mkdir ~/kernels`.  
    - Execute the exact command from `.codex/test_kernel_build.md` with `set -o pipefail` and pipe output to `~/logs/testXX.log`.  
    - Record verification steps noted in the test (e.g., `dpkg -l docker.io`, `uname -r`, `getconf PAGE_SIZE`, checking `.deb` output, etc.).  
+   - For install-only scenarios (`--install-from …`), check the local `test-artifacts/` directory *before* provisioning the host so you know whether the required tarball/`deb` bundle already exists. If the artifact is missing or outdated, rebuild it first by rerunning the corresponding build test, archive the result under `test-artifacts/`, and then proceed with the install-only step by copying that archive to the host.
    - If artifacts are needed later (install-from tests), tar the specific `~/kernels/<tag>` directory (or `.deb` files) into `~/artifacts/<descriptive>.tgz`, then `scp -A` them back to `test-artifacts/` locally.
 4. **Host lifecycle**  
    - After each test (pass or fail), copy any required artifacts/logs off the host.  
