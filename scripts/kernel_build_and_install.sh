@@ -332,13 +332,23 @@ update_extraversion() {
   local kernel_dir="$1"
   local change_to_64k="$2"
   local append_value="$3"
+  local original_line original_extraversion
+  original_line="$(grep -m1 '^EXTRAVERSION[[:space:]]*=' "${kernel_dir}/Makefile" || true)"
+  original_extraversion="${original_line#*=}"
+  original_extraversion="$(echo "${original_extraversion}" | sed -e 's/^[[:space:]]*//')"
   local os_name
   os_name="$(lsb_release -si 2>/dev/null | tr '[:upper:]' '[:lower:]' || uname -s | tr '[:upper:]' '[:lower:]')"
-  local extra="-${os_name}${append_value}"
+  local extra_suffix="-${os_name}${append_value}"
   if [[ "${change_to_64k}" == "true" ]]; then
-    extra="-${os_name}-64k${append_value}"
+    extra_suffix="-${os_name}-64k${append_value}"
   fi
-  sed -i "s/^EXTRAVERSION = .*/EXTRAVERSION = ${extra}/" "${kernel_dir}/Makefile"
+  local new_extraversion
+  if [[ -n "${original_extraversion}" ]]; then
+    new_extraversion="${original_extraversion}${extra_suffix}"
+  else
+    new_extraversion="${extra_suffix}"
+  fi
+  sed -i "s/^EXTRAVERSION[[:space:]]*=.*/EXTRAVERSION = ${new_extraversion}/" "${kernel_dir}/Makefile"
 }
 
 collect_kernel_info() {
