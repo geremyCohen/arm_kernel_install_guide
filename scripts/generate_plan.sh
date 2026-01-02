@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Required command '$1' not found in PATH." >&2
+    exit 1
+  }
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEMPLATE_PATH="${REPO_ROOT}/plans/speedometer.yaml"
 OUTPUT_PATH="${REPO_ROOT}/plan.yaml"
+KERNEL_BASE="${HOME}/kernels"
+
+require_cmd yq
 
 if [[ ! -f "${TEMPLATE_PATH}" ]]; then
   echo "Template ${TEMPLATE_PATH} was not found." >&2
+  exit 1
+fi
+if [[ ! -d "${KERNEL_BASE}" ]]; then
+  echo "Kernel directory ${KERNEL_BASE} does not exist." >&2
   exit 1
 fi
 
@@ -20,68 +34,64 @@ fi
 PLAN_SUFFIX="$(date +%m%d%y-%H%M)"
 SUT_NAME="fastpath_test_${PLAN_SUFFIX}"
 
-python3 - "${TEMPLATE_PATH}" "${OUTPUT_PATH}" "${SUT_IP}" "${SUT_NAME}" <<'PY'
-import sys
-import pathlib
+mapfile -t sorted_entries < <(LC_ALL=C ls -1t "${KERNEL_BASE}" 2>/dev/null || true)
+selected_dirs=()
+for entry in "${sorted_entries[@]}"; do
+  [[ -n "${entry}" ]] || continue
+  path="${KERNEL_BASE}/${entry}"
+  [[ -d "${path}" ]] || continue
+  [[ -f "${path}/Image.gz" && -f "${path}/modules.tar.xz" ]] || continue
+  selected_dirs+=("${path}")
+  (( ${#selected_dirs[@]} == 2 )) && break
+done
 
-try:
-    import yaml
-except ImportError:
-    sys.stderr.write(
-        "PyYAML is required for generate_plan.sh. Install it with "
-        "'python3 -m pip install pyyaml'.\n"
-    )
-    sys.exit(1)
+if (( ${#selected_dirs[@]} < 2 )); then
+  echo "Unable to find two kernel artifact directories under ${KERNEL_BASE}." >&2
+  exit 1
+fi
 
-template_path, output_path, sut_ip, sut_name = sys.argv[1:5]
+PROFILE0_NAME="$(basename "${selected_dirs[0]}")"
+PROFILE0_KERNEL="${selected_dirs[0]}/Image.gz"
+PROFILE0_MODULES="${selected_dirs[0]}/modules.tar.xz"
+PROFILE1_NAME="$(basename "${selected_dirs[1]}")"
+PROFILE1_KERNEL="${selected_dirs[1]}/Image.gz"
+PROFILE1_MODULES="${selected_dirs[1]}/modules.tar.xz"
 
-with open(template_path, "r", encoding="utf-8") as fh:
-    data = yaml.safe_load(fh)
+export PLAN_SUT_NAME="${SUT_NAME}"
+export PLAN_SUT_IP="${SUT_IP}"
+export PLAN_PROFILE0_NAME="${PROFILE0_NAME}"
+export PLAN_PROFILE0_KERNEL="${PROFILE0_KERNEL}"
+export PLAN_PROFILE0_MODULES="${PROFILE0_MODULES}"
+export PLAN_PROFILE1_NAME="${PROFILE1_NAME}"
+export PLAN_PROFILE1_KERNEL="${PROFILE1_KERNEL}"
+export PLAN_PROFILE1_MODULES="${PROFILE1_MODULES}"
 
-base_dir = pathlib.Path.home() / "kernels"
-candidates = []
-if base_dir.exists():
-    for child in base_dir.iterdir():
-        if not child.is_dir():
-            continue
-        if (child / "Image.gz").is_file() and (child / "modules.tar.xz").is_file():
-            candidates.append((child.stat().st_mtime, child))
-
-if len(candidates) < 2:
-    sys.stderr.write(
-        f"Need at least two kernel artifact directories under {base_dir}, "
-        f"but found {len(candidates)}.\n"
-    )
-    sys.exit(1)
-
-candidates.sort(key=lambda item: item[0], reverse=True)
-selected = [path for _, path in candidates[:2]]
-
-existing_cmdlines = []
-for profile in (data.get("swprofiles") or []):
-    existing_cmdlines.append(profile.get("cmdline"))
-
-profiles = []
-for idx, path in enumerate(selected):
-    entry = {
-        "name": path.name,
-        "kernel": str(path / "Image.gz"),
-        "modules": str(path / "modules.tar.xz"),
+yq eval '
+  .sut.name = env(PLAN_SUT_NAME) |
+  .sut.connection.params.host = env(PLAN_SUT_IP) |
+  .swprofiles = [
+    {
+      name: env(PLAN_PROFILE0_NAME),
+      kernel: env(PLAN_PROFILE0_KERNEL),
+      modules: env(PLAN_PROFILE0_MODULES)
+    },
+    {
+      name: env(PLAN_PROFILE1_NAME),
+      kernel: env(PLAN_PROFILE1_KERNEL),
+      modules: env(PLAN_PROFILE1_MODULES)
     }
-    if idx < len(existing_cmdlines) and existing_cmdlines[idx]:
-        entry["cmdline"] = existing_cmdlines[idx]
-    profiles.append(entry)
-
-data.setdefault("sut", {})
-data["sut"]["name"] = sut_name
-conn = data["sut"].setdefault("connection", {})
-params = conn.setdefault("params", {})
-params["host"] = sut_ip
-data["swprofiles"] = profiles
-
-with open(output_path, "w", encoding="utf-8") as fh:
-    yaml.safe_dump(data, fh, sort_keys=False)
-PY
+  ]
+' "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
 
 echo "Plan written to ${OUTPUT_PATH}"
 echo "Generated plan name: ${SUT_NAME}"
+echo
+echo "After Fastpath run completes, gather results with:"
+echo "  fastpath result list results/ --object swprofile"
+echo
+echo "Relative results per kernel:"
+echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --relative"
+echo "  fastpath result show results/ --swprofile ${PROFILE1_NAME} --relative"
+echo
+echo "Comparison between kernels:"
+echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --swprofile ${PROFILE1_NAME} --relative"
