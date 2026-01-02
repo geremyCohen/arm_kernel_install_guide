@@ -56,9 +56,9 @@ run_ssh() {
 }
 
 ensure_packages() {
-  log "Ensuring docker.io is installed"
+  log "Ensuring btop and docker.io are installed"
   run_ssh "sudo apt-get update -y"
-  run_ssh "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io"
+  run_ssh "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io btop"
 }
 
 configure_groups() {
