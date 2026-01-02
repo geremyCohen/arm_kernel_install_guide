@@ -4,6 +4,8 @@ Use the multi-kernel build script to validate concurrent and single builds on a 
 
 Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for every requested target and that artifacts land under ~/kernels/<kernel_version>.
 
+On systems that don't require building, use a c8g.8xl.  For systems that do require building, use a c8g.24xl.
+
 
 ./scripts/kernel_build_and_install.sh --demo-default-build # verify single-tag (v6.18.1) build without fastpath and ensure docker is NOT installed.
 
@@ -43,8 +45,4 @@ Before each run, delete ~/kernels on the SUT. Verify tuxmake reports PASS for ev
 
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 # Auto-detect install format; ensure the directory already contains either flat artifacts or .deb packages, then let the automatic reboot occur and verify uname -r matches the installed kernel.
 
-./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --fastpath true # Explicit Fastpath build; confirm docker.io is installed and both tag directories contain Fastpath configs.
-
-./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --fastpath true --kernel-install v6.19-rc1 --kernel-command-line "console=ttyAMA0 earlycon" # Fastpath build/install; after the automatic reboot check uname -r and confirm /etc/default/grub contains the custom command line.
-
-./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat --fastpath true # Install-only Fastpath scenario; ensure prior artifacts were built with --fastpath true and confirm uname -r after the automatic reboot.
+./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --fastpath true # Explicit Fastpath build; confirm docker.io is installed and both tag directories contain Fastpath configs. Fastpath runs are build-only—never combine --fastpath with install flags.
