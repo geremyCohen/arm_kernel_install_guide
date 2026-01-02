@@ -1,6 +1,6 @@
 ## Fastpath Host Setup Test
 
-1. Run `./scripts/configure_fastpath_host.sh --host <FASTPATH_HOST> --assume-yes` from the repo root.
+1. Run `./scripts/configure_fastpath_host.sh --host <FASTPATH_HOST>` from the repo root.
 2. SSH into the host (`ssh ubuntu@<FASTPATH_HOST>`) and verify `~/.bashrc` or `~/.profile` contains `export PATH=$HOME/venv/bin:$HOME/fastpath/fastpath:$PATH`.
 3. Start a fresh SSH session and execute `fastpath --help`; expect the usage banner (no ModuleNotFound errors).
 4. Optionally run `which fastpath` to ensure it resolves to `~/fastpath/fastpath/fastpath` and `python3 --version` shows the venv interpreter (`~/venv/bin/python3`).
