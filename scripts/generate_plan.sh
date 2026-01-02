@@ -84,3 +84,4 @@ with open(output_path, "w", encoding="utf-8") as fh:
 PY
 
 echo "Plan written to ${OUTPUT_PATH}"
+echo "Generated plan name: ${SUT_NAME}"
