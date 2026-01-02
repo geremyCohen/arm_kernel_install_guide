@@ -32,7 +32,6 @@ FASTPATH="${FASTPATH_DEFAULT}"
 KERNEL_DIR="${KERNEL_DIR_DEFAULT}"
 OUTPUT_BASE="${OUTPUT_BASE_DEFAULT}"
 VENV_PATH="${VENV_PATH_DEFAULT}"
-ASSUME_YES="false"
 INCLUDE_BINDEB_PKG="${INCLUDE_BINDEB_PKG_DEFAULT}"
 DEMO_FASTPATH_BUILDS="${DEMO_FASTPATH_BUILDS_DEFAULT}"
 DEMO_DEFAULT_BUILD="${DEMO_DEFAULT_BUILD_DEFAULT}"
@@ -65,9 +64,8 @@ Options:
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --install-from <dir>              Install an existing kernel from artifacts in <dir>
   --install-format <flat|deb|auto>  Force interpretation of --install-from artifacts (default: auto)
-  --demo-default-build             Shortcut for --tags v6.18.1 --fastpath false --assume-yes
-  --demo-fastpath-build            Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath true --assume-yes
-  --assume-yes                     Do not prompt before starting
+  --demo-default-build             Shortcut for --tags v6.18.1 --fastpath false
+  --demo-fastpath-build            Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath true
   -h, --help                       Show this help message
 
 Booleans accept: true/false/yes/no/1/0 (case-insensitive).
@@ -529,19 +527,8 @@ install_kernel_artifacts() {
 }
 
 prompt_reboot() {
-  if [[ "${ASSUME_YES}" == "true" ]]; then
-    log "Kernel installed. --assume-yes supplied, rebooting automatically."
-    sudo reboot
-    return
-  fi
-
-  read -rp "Kernel installed. Reboot now? (y/N): " reboot_resp
-  if [[ "${reboot_resp,,}" =~ ^(y|yes)$ ]]; then
-    log "Rebooting..."
-    sudo reboot
-  else
-    log "Reboot skipped. Remember to reboot manually to use the new kernel."
-  fi
+  log "Kernel installed. Rebooting immediately."
+  sudo reboot
 }
 
 describe_tag() {
@@ -723,7 +710,6 @@ main() {
         FASTPATH="true"
         shift 1
         ;;
-      --assume-yes) ASSUME_YES="true"; shift 1 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
     esac
@@ -735,13 +721,11 @@ main() {
 
   if [[ "${DEMO_DEFAULT_BUILD}" == "true" ]]; then
     TAGS=("v6.18.1")
-    ASSUME_YES="true"
     FASTPATH="false"
   fi
 
   if [[ "${DEMO_FASTPATH_BUILDS}" == "true" ]]; then
     TAGS=("v6.18.1" "v6.19-rc1")
-    ASSUME_YES="true"
     FASTPATH="true"
   fi
 
@@ -759,10 +743,6 @@ main() {
     [[ -d "${INSTALL_FROM_PATH}" ]] || fail "Install source ${INSTALL_FROM_PATH} does not exist"
 
     summarize_install_from
-    if [[ "${ASSUME_YES}" != "true" ]]; then
-      read -rp "Proceed with kernel installation? (y/N): " resp
-      [[ "${resp,,}" =~ ^(y|yes)$ ]] || { log "Aborted by user"; exit 0; }
-    fi
 
     require_cmd sudo
     require_cmd dpkg
@@ -817,10 +797,6 @@ main() {
   fi
 
   summarize_settings
-  if [[ "${ASSUME_YES}" != "true" ]]; then
-    read -rp "Proceed with kernel build(s)? (y/N): " resp
-    [[ "${resp,,}" =~ ^(y|yes)$ ]] || { log "Aborted by user"; exit 0; }
-  fi
 
   require_cmd sudo
   require_cmd git
