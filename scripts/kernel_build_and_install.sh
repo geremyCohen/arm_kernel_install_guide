@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck disable=SC2034
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+
 REPO_DEFAULT="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 BRANCH_DEFAULT="linux-rolling-stable"
 TAG_DEFAULT=""
@@ -18,6 +22,7 @@ DEMO_FASTPATH_BUILDS_DEFAULT="false"
 DEMO_DEFAULT_BUILD_DEFAULT="false"
 REQUIRES_DOCKER_DEFAULT="false"
 INSTALL_FORMAT_DEFAULT="auto"
+DRY_RUN_DEFAULT="false"
 
 REPO="${REPO_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
@@ -38,6 +43,9 @@ DEMO_DEFAULT_BUILD="${DEMO_DEFAULT_BUILD_DEFAULT}"
 REQUIRES_DOCKER="${REQUIRES_DOCKER_DEFAULT}"
 INSTALL_FROM_PATH=""
 INSTALL_FORMAT="${INSTALL_FORMAT_DEFAULT}"
+DRY_RUN="${DRY_RUN_DEFAULT}"
+PLAN_FILE_PATH=""
+declare -a FORWARDED_ARGS=()
 declare -a TAGS=()
 TOTAL_BUILDS=0
 
@@ -64,6 +72,7 @@ Options:
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
   --install-from <dir>              Install an existing kernel from artifacts in <dir>
   --install-format <flat|deb|auto>  Force interpretation of --install-from artifacts (default: auto)
+  --dry-run                         Generate a runnable plan script (minus --dry-run) and exit
   --demo-default-build             Shortcut for --tags v6.18.1 --fastpath false
   --demo-fastpath-build            Shortcut for --tags v6.18.1,v6.19-rc1 --fastpath true
   -h, --help                       Show this help message
@@ -283,6 +292,9 @@ resolve_base_config_source() {
 stage_base_config() {
   local dest="$1"
   local source_config="$2"
+  if [[ -e "${dest}" && -e "${source_config}" && "${source_config}" -ef "${dest}" ]]; then
+    return
+  fi
   cp "${source_config}" "${dest}"
 }
 
@@ -294,7 +306,12 @@ preserve_source_config() {
   mkdir -p "${output_dir}" "${stock_dir}"
   cp -f "${source_config}" "${output_dir}/config.stock"
   local sanitized_kernel="${host_kernel//\//-}"
-  cp -f "${source_config}" "${stock_dir}/config-${sanitized_kernel}"
+  local stock_target="${stock_dir}/config-${sanitized_kernel}"
+  if [[ -e "${stock_target}" && "${source_config}" -ef "${stock_target}" ]]; then
+    :
+  else
+    cp -f "${source_config}" "${stock_target}"
+  fi
 }
 
 write_custom_configs() {
@@ -356,6 +373,70 @@ collect_kernel_info() {
   kernel_version="$(make kernelversion | tr -d '[:space:]')"
   popd >/dev/null
   echo "${kernel_version}"
+}
+
+detect_artifact_kernel_release() {
+  local artifact_dir="$1"
+  local fallback="$2"
+  local metadata_file="${artifact_dir}/metadata.json"
+  if [[ -f "${metadata_file}" ]]; then
+    local release=""
+    release="$(python3 - "${metadata_file}" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+print(data.get("source", {}).get("kernelrelease", ""))
+PY
+)" || release=""
+    if [[ -n "${release}" ]]; then
+      echo "${release}"
+      return
+    fi
+  fi
+  local tarball="${artifact_dir}/modules.tar.xz"
+  if [[ -f "${tarball}" ]]; then
+    local version=""
+    version="$(tar -tf "${tarball}" 2>/dev/null | awk -F'/' '$1 == "lib" && $2 == "modules" && $3 != "" {print $3; exit}')" || version=""
+    if [[ -n "${version}" ]]; then
+      echo "${version}"
+      return
+    fi
+  fi
+  echo "${fallback}"
+}
+
+determine_built_kernel_release() {
+  local kernel_dir="$1"
+  local build_dir="$2"
+  local fallback="$3"
+  local output_dir="${4-}"
+  local release=""
+  local release_file="${build_dir}/include/config/kernel.release"
+  if [[ -f "${release_file}" ]]; then
+    release="$(tr -d '[:space:]' <"${release_file}")"
+    if [[ -n "${release}" ]]; then
+      echo "${release}"
+      return
+    fi
+  fi
+  if [[ -z "${release}" && -n "${output_dir}" ]]; then
+    release="$(detect_artifact_kernel_release "${output_dir}" "")"
+    if [[ -n "${release}" ]]; then
+      echo "${release}"
+      return
+    fi
+  fi
+  if [[ -d "${kernel_dir}" ]]; then
+    pushd "${kernel_dir}" >/dev/null
+    release="$(make -s O="${build_dir}" kernelrelease 2>/dev/null | tr -d '[:space:]')" || release=""
+    popd >/dev/null
+  fi
+  if [[ -n "${release}" ]]; then
+    echo "${release}"
+  else
+    echo "${fallback}"
+  fi
 }
 
 run_tuxmake_build() {
@@ -506,11 +587,13 @@ install_kernel_artifacts() {
   local output_dir="$1"
   local kernel_version="$2"
   local kernel_cmdline="$3"
-  log "Installing kernel artifacts from ${output_dir}"
+  local modules_tar="${output_dir}/modules.tar.xz"
+  kernel_version="$(detect_artifact_kernel_release "${output_dir}" "${kernel_version}")"
+  log "Installing kernel artifacts from ${output_dir} (release ${kernel_version})"
   sudo cp "${output_dir}/config" "/boot/config-${kernel_version}"
   sudo cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
   sudo rm -rf "/lib/modules/${kernel_version}"
-  sudo tar -C /lib -xf "${output_dir}/modules.tar.xz" --strip-components=1
+  sudo tar -C /lib -xf "${modules_tar}" --strip-components=1
   sudo depmod "${kernel_version}"
   if [[ -f "${output_dir}/perf.tar.xz" ]]; then
     sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
@@ -529,6 +612,56 @@ install_kernel_artifacts() {
 prompt_reboot() {
   log "Kernel installed. Rebooting immediately."
   sudo reboot
+}
+
+update_forwarded_arg() {
+  local flag="$1"
+  local value="$2"
+  for (( i=0; i<${#FORWARDED_ARGS[@]}-1; i++ )); do
+    if [[ "${FORWARDED_ARGS[i]}" == "${flag}" ]]; then
+      FORWARDED_ARGS[i+1]="${value}"
+      return
+    fi
+  done
+}
+
+generate_plan_script() {
+  local plan_args=("$@")
+  require_cmd python3
+  local label_source="${plan_args[*]}"
+  local sanitized
+  if [[ -z "${label_source}" ]]; then
+    sanitized="defaults"
+  else
+    sanitized="$(printf '%s' "${label_source}" | tr ' ' '_' | tr -cd '[:alnum:]_-')"
+    [[ -n "${sanitized}" ]] || sanitized="defaults"
+    sanitized="${sanitized:0:48}"
+  fi
+  local hash
+  hash="$(printf '%s\n' "${plan_args[@]}" | python3 - <<'PY'
+import hashlib, sys
+data = sys.stdin.read().encode()
+if not data:
+    data = b'defaults'
+print(hashlib.sha256(data).hexdigest()[:10])
+PY
+)"
+  local tmp_dir="${TMPDIR:-/tmp}"
+  local file_name="kernel_plan_${sanitized}_${hash}.sh"
+  PLAN_FILE_PATH="${tmp_dir}/${file_name}"
+  {
+    head -n 1 "${SCRIPT_PATH}"
+    echo "# Generated by kernel_build_and_install.sh --dry-run on $(date -u)"
+    tail -n +2 "${SCRIPT_PATH}" | sed '$d'
+    printf '\nmain'
+    if (( ${#plan_args[@]} > 0 )); then
+      printf ' %q' "${plan_args[@]}"
+    fi
+    echo
+  } > "${PLAN_FILE_PATH}"
+  chmod +x "${PLAN_FILE_PATH}"
+  log "Dry-run plan written to ${PLAN_FILE_PATH}"
+  printf '%s\n' "${PLAN_FILE_PATH}"
 }
 
 describe_tag() {
@@ -636,6 +769,16 @@ build_kernel_for_tag() {
 
   run_tuxmake_build "${kernel_dir}" "${base_config}" "${custom_config}" "${output_dir}" "${VENV_PATH}"
 
+  local built_kernel_version
+  built_kernel_version="$(determine_built_kernel_release "${kernel_dir}" "${output_dir}/build" "${kernel_version}" "${output_dir}")"
+  if [[ "${built_kernel_version}" != "${kernel_version}" ]]; then
+    local new_output_dir="${OUTPUT_BASE}/${built_kernel_version}"
+    [[ -e "${new_output_dir}" ]] && fail "Output directory ${new_output_dir} already exists; remove it or choose a different --output-base"
+    mv "${output_dir}" "${new_output_dir}"
+    output_dir="${new_output_dir}"
+  fi
+  kernel_version="${built_kernel_version}"
+
   save_kernel_metadata "${output_dir}" "${kernel_version}"
   log "[${label}] Build artifacts are located in ${output_dir}"
 
@@ -653,31 +796,68 @@ build_kernel_for_tag() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --repo) REPO="$2"; shift 2 ;;
-      --branch) BRANCH="$2"; shift 2 ;;
-      --tag) TAGS+=("$2"); shift 2 ;;
-      --tags) IFS=',' read -r -a tag_list <<<"$2"; TAGS+=("${tag_list[@]}"); shift 2 ;;
-      --tag-latest) TAGS+=(""); shift 1 ;;
-      --config-file) CONFIG_FILE="$2"; shift 2 ;;
-      --kernel-command-line) KERNEL_CMDLINE="$2"; shift 2 ;;
-      --append-to-kernel-version|--append) APPEND_TO_KERNEL_VERSION="$2"; shift 2 ;;
+      --repo)
+        REPO="$2"
+        FORWARDED_ARGS+=("--repo" "$2")
+        shift 2
+        ;;
+      --branch)
+        BRANCH="$2"
+        FORWARDED_ARGS+=("--branch" "$2")
+        shift 2
+        ;;
+      --tag)
+        TAGS+=("$2")
+        FORWARDED_ARGS+=("--tag" "$2")
+        shift 2
+        ;;
+      --tags)
+        IFS=',' read -r -a tag_list <<<"$2"
+        TAGS+=("${tag_list[@]}")
+        FORWARDED_ARGS+=("--tags" "$2")
+        shift 2
+        ;;
+      --tag-latest)
+        TAGS+=("")
+        FORWARDED_ARGS+=("--tag-latest")
+        shift 1
+        ;;
+      --config-file)
+        CONFIG_FILE="$2"
+        FORWARDED_ARGS+=("--config-file" "$2")
+        shift 2
+        ;;
+      --kernel-command-line)
+        KERNEL_CMDLINE="$2"
+        FORWARDED_ARGS+=("--kernel-command-line" "$2")
+        shift 2
+        ;;
+      --append-to-kernel-version|--append)
+        APPEND_TO_KERNEL_VERSION="$2"
+        FORWARDED_ARGS+=("$1" "$2")
+        shift 2
+        ;;
       --kernel-install)
+        local forwarded_value=""
         next_kernel_install_arg="${2-}"
         if [[ $# -gt 1 && "${next_kernel_install_arg}" != --* ]]; then
           case "${next_kernel_install_arg,,}" in
             y|yes|true|1)
               KERNEL_INSTALL="true"
               KERNEL_INSTALL_OPTIONAL_TAG=""
+              forwarded_value="true"
               shift 2
               ;;
             n|no|false|0)
               KERNEL_INSTALL="false"
               KERNEL_INSTALL_OPTIONAL_TAG=""
+              forwarded_value="false"
               shift 2
               ;;
             *)
               KERNEL_INSTALL="true"
               KERNEL_INSTALL_OPTIONAL_TAG="${next_kernel_install_arg}"
+              forwarded_value="${next_kernel_install_arg}"
               shift 2
               ;;
           esac
@@ -686,31 +866,74 @@ main() {
           KERNEL_INSTALL_OPTIONAL_TAG=""
           shift 1
         fi
+        if [[ -n "${forwarded_value}" ]]; then
+          FORWARDED_ARGS+=("--kernel-install" "${forwarded_value}")
+        else
+          FORWARDED_ARGS+=("--kernel-install")
+        fi
         ;;
-      --change-to-64k) CHANGE_TO_64K="$(parse_bool "$2")"; shift 2 ;;
+      --change-to-64k)
+        CHANGE_TO_64K="$(parse_bool "$2")"
+        FORWARDED_ARGS+=("--change-to-64k" "${CHANGE_TO_64K}")
+        shift 2
+        ;;
       --fastpath)
         FASTPATH="$(parse_bool "$2")"
+        FORWARDED_ARGS+=("--fastpath" "${FASTPATH}")
         if [[ "${FASTPATH}" == "true" ]]; then
           REQUIRES_DOCKER="true"
         fi
         shift 2
         ;;
-      --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
-      --output-base) OUTPUT_BASE="$2"; shift 2 ;;
-      --venv-path) VENV_PATH="$2"; shift 2 ;;
-      --include-bindeb-pkg) INCLUDE_BINDEB_PKG="true"; shift 1 ;;
-      --install-from) INSTALL_FROM_PATH="$2"; shift 2 ;;
-      --install-format) INSTALL_FORMAT="$2"; shift 2 ;;
+      --kernel-dir)
+        KERNEL_DIR="$2"
+        FORWARDED_ARGS+=("--kernel-dir" "$2")
+        shift 2
+        ;;
+      --output-base)
+        OUTPUT_BASE="$2"
+        FORWARDED_ARGS+=("--output-base" "$2")
+        shift 2
+        ;;
+      --venv-path)
+        VENV_PATH="$2"
+        FORWARDED_ARGS+=("--venv-path" "$2")
+        shift 2
+        ;;
+      --include-bindeb-pkg)
+        INCLUDE_BINDEB_PKG="true"
+        FORWARDED_ARGS+=("--include-bindeb-pkg")
+        shift 1
+        ;;
+      --install-from)
+        INSTALL_FROM_PATH="$2"
+        FORWARDED_ARGS+=("--install-from" "$2")
+        shift 2
+        ;;
+      --install-format)
+        INSTALL_FORMAT="$2"
+        FORWARDED_ARGS+=("--install-format" "$2")
+        shift 2
+        ;;
       --demo-default-build)
         DEMO_DEFAULT_BUILD="true"
+        FORWARDED_ARGS+=("--demo-default-build")
         shift 1
         ;;
       --demo-fastpath-build)
         DEMO_FASTPATH_BUILDS="true"
         FASTPATH="true"
+        FORWARDED_ARGS+=("--demo-fastpath-build")
         shift 1
         ;;
-      -h|--help) usage; exit 0 ;;
+      --dry-run)
+        DRY_RUN="true"
+        shift 1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
       *) fail "Unknown argument: $1" ;;
     esac
   done
@@ -735,20 +958,15 @@ main() {
     REQUIRES_DOCKER="false"
   fi
 
+  local INSTALL_FROM_REQUESTED="false"
   if [[ -n "${INSTALL_FROM_PATH}" ]]; then
     if [[ "${KERNEL_INSTALL}" == "true" || -n "${KERNEL_INSTALL_OPTIONAL_TAG}" ]]; then
       fail "--install-from cannot be combined with --kernel-install"
     fi
     INSTALL_FROM_PATH="$(readlink -f "${INSTALL_FROM_PATH}")"
     [[ -d "${INSTALL_FROM_PATH}" ]] || fail "Install source ${INSTALL_FROM_PATH} does not exist"
-
-    summarize_install_from
-
-    require_cmd sudo
-    require_cmd dpkg
-    require_cmd tar
-    install_prebuilt_kernel "${INSTALL_FROM_PATH}" "${INSTALL_FORMAT}" "${KERNEL_CMDLINE}"
-    exit 0
+    update_forwarded_arg "--install-from" "${INSTALL_FROM_PATH}"
+    INSTALL_FROM_REQUESTED="true"
   fi
 
   if (( ${#TAGS[@]} == 0 )); then
@@ -759,6 +977,25 @@ main() {
   [[ -n "${REPO}" ]] || fail "Kernel repo (--repo) cannot be empty"
   if [[ -n "${CONFIG_FILE}" && ! -f "${CONFIG_FILE}" ]]; then
     fail "Config file ${CONFIG_FILE} does not exist"
+  fi
+  if [[ -n "${CONFIG_FILE}" ]]; then
+    CONFIG_FILE="$(readlink -f "${CONFIG_FILE}")"
+    update_forwarded_arg "--config-file" "${CONFIG_FILE}"
+  fi
+
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    generate_plan_script "${FORWARDED_ARGS[@]}"
+    exit 0
+  fi
+
+  if [[ "${INSTALL_FROM_REQUESTED}" == "true" ]]; then
+    summarize_install_from
+
+    require_cmd sudo
+    require_cmd dpkg
+    require_cmd tar
+    install_prebuilt_kernel "${INSTALL_FROM_PATH}" "${INSTALL_FORMAT}" "${KERNEL_CMDLINE}"
+    exit 0
   fi
   if [[ "${KERNEL_INSTALL}" == "true" ]]; then
     if (( TOTAL_BUILDS == 1 )); then

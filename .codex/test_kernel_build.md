@@ -11,6 +11,8 @@ On systems that don't require building, use a c8g.8xl.  For systems that do requ
 
 ./scripts/kernel_build_and_install.sh --demo-fastpath-build # verify two-tag build with fastpath configs and confirm docker IS installed.
 
+./scripts/kernel_build_and_install.sh --tags v6.18.1 --dry-run # Expect a /tmp/kernel_plan_* script containing the full build logic with identical arguments (minus --dry-run). Confirm nothing is installed (no apt output and ~/kernels untouched) and note the path for reuse.
+
 ./scripts/kernel_build_and_install.sh --tags v6.19-rc1 # Build a single RC tag; confirm artifacts land under ~/kernels/<rc_version> and docker.io remains uninstalled.
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --include-bindeb-pkg # Verify DEB packages are created.
