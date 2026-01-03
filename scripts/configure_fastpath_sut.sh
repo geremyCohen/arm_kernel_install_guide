@@ -4,7 +4,6 @@ set -euo pipefail
 HOST=""
 SSH_USER="ubuntu"
 FP_USER="fpuser"
-ASSUME_YES="false"
 SSH_FLAGS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 
 usage() {
@@ -15,7 +14,6 @@ Options:
   --host <host>            Target hostname or IP (required)
   --ssh-user <name>        Existing admin user to SSH as (default: ubuntu)
   --fp-user <name>         Fastpath user to create/configure (default: fpuser)
-  --assume-yes             Run without confirmation prompt
   -h, --help               Show this message
 USAGE
 }
@@ -35,7 +33,6 @@ parse_args() {
       --host) HOST="$2"; shift 2 ;;
       --ssh-user) SSH_USER="$2"; shift 2 ;;
       --fp-user) FP_USER="$2"; shift 2 ;;
-      --assume-yes) ASSUME_YES="true"; shift ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
     esac
@@ -44,11 +41,7 @@ parse_args() {
 }
 
 confirm() {
-  if [[ "${ASSUME_YES}" == "true" ]]; then
-    return
-  fi
-  read -rp "Configure ${HOST} as fastpath SUT (y/N)? " resp
-  [[ "${resp,,}" =~ ^(y|yes)$ ]] || fail "Aborted by user"
+  log "Configuring ${HOST} as fastpath SUT (non-interactive mode)"
 }
 
 run_ssh() {
