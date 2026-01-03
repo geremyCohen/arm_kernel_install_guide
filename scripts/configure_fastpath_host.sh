@@ -3,7 +3,6 @@ set -euo pipefail
 
 HOST=""
 SSH_USER="ubuntu"
-ASSUME_YES="false"
 REPO_URL="https://git.gitlab.arm.com/tooling/fastpath.git"
 SSH_FLAGS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 
@@ -14,7 +13,6 @@ Usage: configure_fastpath_host.sh --host <ip-or-name> [options]
 Options:
   --host <host>       Target fastpath host (required)
   --ssh-user <name>   SSH user with sudo rights (default: ubuntu)
-  --assume-yes        Skip confirmation prompt
   -h, --help          Show this message
 USAGE
 }
@@ -27,7 +25,6 @@ parse_args() {
     case "$1" in
       --host) HOST="$2"; shift 2 ;;
       --ssh-user) SSH_USER="$2"; shift 2 ;;
-      --assume-yes) ASSUME_YES="true"; shift ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown option $1" ;;
     esac
@@ -36,9 +33,7 @@ parse_args() {
 }
 
 confirm() {
-  if [[ "${ASSUME_YES}" == "true" ]]; then return; fi
-  read -rp "Configure fastpath host ${HOST}? (y/N): " resp
-  [[ "${resp,,}" =~ ^(y|yes)$ ]] || fail "Aborted"
+  log "Configuring fastpath host ${HOST} (non-interactive mode)"
 }
 
 ssh_cmd() { ssh "${SSH_FLAGS[@]}" "${SSH_USER}@${HOST}" "$@"; }

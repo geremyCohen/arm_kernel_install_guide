@@ -5,7 +5,6 @@ HOST=""
 SSH_USER="ubuntu"
 REMOTE_DIR=""
 LOCAL_DIR="${HOME}/kernels"
-ASSUME_YES="false"
 declare -a VERSIONS=()
 SSH_FLAGS=(-A -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
 REQUIRED_FILES=(Image.gz modules.tar.xz)
@@ -21,7 +20,6 @@ Options:
   --remote-dir <path>       Remote kernels directory (default: ~/kernels)
   --local-dir <path>        Local destination directory (default: ~/kernels)
   --version <name>          Specific kernel version directory to copy (may be repeated)
-  --assume-yes              Skip confirmation prompt
   -h, --help                Show this message
 USAGE
 }
@@ -37,7 +35,6 @@ parse_args() {
       --remote-dir) REMOTE_DIR="$2"; shift 2 ;;
       --local-dir) LOCAL_DIR="$2"; shift 2 ;;
       --version) VERSIONS+=("$2"); shift 2 ;;
-      --assume-yes) ASSUME_YES="true"; shift ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown option $1" ;;
     esac
@@ -81,8 +78,7 @@ resolve_local_path() {
 }
 
 confirm() {
-  if [[ "${ASSUME_YES}" == "true" ]]; then return; fi
-  log "About to pull kernel artifacts with the following settings:"
+  log "Pulling kernel artifacts:"
   log "  Host        : ${HOST}"
   log "  SSH user    : ${SSH_USER}"
   log "  Remote dir  : ${REMOTE_DIR}"
@@ -92,8 +88,6 @@ confirm() {
   else
     log "  Versions    : auto-detected"
   fi
-  read -rp "Proceed? (y/N): " resp
-  [[ "${resp,,}" =~ ^(y|yes)$ ]] || fail "Aborted"
 }
 
 ensure_local_dir() {
