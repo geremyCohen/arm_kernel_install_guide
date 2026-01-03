@@ -18,10 +18,9 @@ swprofiles:
       - thp_anon=64K:always;2M:madvise
 benchmarks:
   - include: speedometer/v2.1.yaml
-  - include: mmtests/kernbench.yaml
 defaults:
   benchmark:
     warmups: 1
-    repeats: 3
+    repeats: 2
     sessions: 2
     timeout: 1h
