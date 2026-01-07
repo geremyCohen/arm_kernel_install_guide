@@ -66,22 +66,8 @@ export PLAN_PROFILE1_NAME="${PROFILE1_NAME}"
 export PLAN_PROFILE1_KERNEL="${PROFILE1_KERNEL}"
 export PLAN_PROFILE1_MODULES="${PROFILE1_MODULES}"
 
-yq eval '
-  .sut.name = env(PLAN_SUT_NAME) |
-  .sut.connection.params.host = env(PLAN_SUT_IP) |
-  .swprofiles = [
-    {
-      name: env(PLAN_PROFILE0_NAME),
-      kernel: env(PLAN_PROFILE0_KERNEL),
-      modules: env(PLAN_PROFILE0_MODULES)
-    },
-    {
-      name: env(PLAN_PROFILE1_NAME),
-      kernel: env(PLAN_PROFILE1_KERNEL),
-      modules: env(PLAN_PROFILE1_MODULES)
-    }
-  ]
-' "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
+YQ_FILTER='.sut.name = env(PLAN_SUT_NAME) | .sut.connection.params.host = env(PLAN_SUT_IP) | .swprofiles = [{name: env(PLAN_PROFILE0_NAME), kernel: env(PLAN_PROFILE0_KERNEL), modules: env(PLAN_PROFILE0_MODULES)}, {name: env(PLAN_PROFILE1_NAME), kernel: env(PLAN_PROFILE1_KERNEL), modules: env(PLAN_PROFILE1_MODULES)}]'
+yq eval "${YQ_FILTER}" "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
 
 echo "Plan written to ${OUTPUT_PATH}"
 echo "Generated plan name: ${SUT_NAME}"
