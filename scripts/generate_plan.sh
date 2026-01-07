@@ -110,6 +110,9 @@ fi
 echo "Plan written to ${OUTPUT_PATH}"
 echo "Generated plan name: ${SUT_NAME}"
 echo
+echo "Run Fastpath with:"
+echo "  fastpath plan exec --output results/ ${OUTPUT_PATH}"
+echo
 echo "After Fastpath run completes, gather results with:"
 echo "  fastpath result list results/ --object swprofile"
 echo
