@@ -111,10 +111,11 @@ INFO_COLOR='\033[1;36m'
 RESET_COLOR='\033[0m'
 heading() { printf '%b%s%b\n' "${INFO_COLOR}" "$1" "${RESET_COLOR}"; }
 
-heading "Plan written to:"
-echo "  ${OUTPUT_PATH}"
 heading "Plan name:"
 echo "  ${SUT_NAME}"
+echo
+heading "Plan written to:"
+echo "  ${OUTPUT_PATH}"
 echo
 heading "Run Fastpath with:"
 echo "  fastpath plan exec --output results/ ${OUTPUT_PATH}"
