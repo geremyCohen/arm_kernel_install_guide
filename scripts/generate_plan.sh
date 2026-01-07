@@ -66,8 +66,44 @@ export PLAN_PROFILE1_NAME="${PROFILE1_NAME}"
 export PLAN_PROFILE1_KERNEL="${PROFILE1_KERNEL}"
 export PLAN_PROFILE1_MODULES="${PROFILE1_MODULES}"
 
-YQ_FILTER='.sut.name = env(PLAN_SUT_NAME) | .sut.connection.params.host = env(PLAN_SUT_IP) | .swprofiles = [{name: env(PLAN_PROFILE0_NAME), kernel: env(PLAN_PROFILE0_KERNEL), modules: env(PLAN_PROFILE0_MODULES)}, {name: env(PLAN_PROFILE1_NAME), kernel: env(PLAN_PROFILE1_KERNEL), modules: env(PLAN_PROFILE1_MODULES)}]'
-yq eval "${YQ_FILTER}" "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
+FILTER='.sut.name = env(PLAN_SUT_NAME) | .sut.connection.params.host = env(PLAN_SUT_IP) | .swprofiles = [{name: env(PLAN_PROFILE0_NAME), kernel: env(PLAN_PROFILE0_KERNEL), modules: env(PLAN_PROFILE0_MODULES)}, {name: env(PLAN_PROFILE1_NAME), kernel: env(PLAN_PROFILE1_KERNEL), modules: env(PLAN_PROFILE1_MODULES)}]'
+if yq --version 2>&1 | grep -qi 'https://github.com/mikefarah/yq'; then
+  yq eval "${FILTER}" "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
+else
+  python3 - "${TEMPLATE_PATH}" "${OUTPUT_PATH}" <<'PY'
+import json, os, sys, yaml
+filter_kwargs = {
+    "sut_name": os.environ["PLAN_SUT_NAME"],
+    "sut_ip": os.environ["PLAN_SUT_IP"],
+    "profile0_name": os.environ["PLAN_PROFILE0_NAME"],
+    "profile0_kernel": os.environ["PLAN_PROFILE0_KERNEL"],
+    "profile0_modules": os.environ["PLAN_PROFILE0_MODULES"],
+    "profile1_name": os.environ["PLAN_PROFILE1_NAME"],
+    "profile1_kernel": os.environ["PLAN_PROFILE1_KERNEL"],
+    "profile1_modules": os.environ["PLAN_PROFILE1_MODULES"],
+}
+template, target = sys.argv[1], sys.argv[2]
+with open(template, "r", encoding="utf-8") as fh:
+    data = yaml.safe_load(fh)
+data.setdefault("sut", {})
+data["sut"]["name"] = filter_kwargs["sut_name"]
+data["sut"].setdefault("connection", {}).setdefault("params", {})["host"] = filter_kwargs["sut_ip"]
+data["swprofiles"] = [
+    {
+        "name": filter_kwargs["profile0_name"],
+        "kernel": filter_kwargs["profile0_kernel"],
+        "modules": filter_kwargs["profile0_modules"],
+    },
+    {
+        "name": filter_kwargs["profile1_name"],
+        "kernel": filter_kwargs["profile1_kernel"],
+        "modules": filter_kwargs["profile1_modules"],
+    },
+]
+with open(target, "w", encoding="utf-8") as fh:
+    yaml.safe_dump(data, fh, sort_keys=False)
+PY
+fi
 
 echo "Plan written to ${OUTPUT_PATH}"
 echo "Generated plan name: ${SUT_NAME}"
