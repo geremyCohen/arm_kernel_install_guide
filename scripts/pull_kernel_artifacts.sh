@@ -17,7 +17,7 @@ Usage: pull_kernel_artifacts.sh --host <ip-or-name> [options]
 Options:
   --host <host>             Kernel build host to pull from (required)
   --ssh-user <name>         SSH user on the build host (default: ubuntu)
-  --remote-dir <path>       Remote kernels directory (default: ~/kernels)
+  --remote-dir <path>       Remote kernels directory (default: ~/work/kernel-builds/fastpath)
   --local-dir <path>        Local destination directory (default: ~/kernels)
   --version <name>          Specific kernel version directory to copy (may be repeated)
   -h, --help                Show this message
@@ -57,8 +57,9 @@ get_remote_home() {
 resolve_remote_path() {
   local path="$1"
   local remote_home="$2"
+  local default_rel="work/kernel-builds/fastpath"
   if [[ -z "${path}" ]]; then
-    printf '%s/kernels\n' "${remote_home}"
+    printf '%s/%s\n' "${remote_home}" "${default_rel}"
     return
   fi
   case "${path}" in
