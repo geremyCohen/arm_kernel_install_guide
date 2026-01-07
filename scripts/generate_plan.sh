@@ -107,18 +107,24 @@ with open(target, "w", encoding="utf-8") as fh:
 PY
 fi
 
-echo "Plan written to ${OUTPUT_PATH}"
-echo "Generated plan name: ${SUT_NAME}"
+INFO_COLOR='\033[1;36m'
+RESET_COLOR='\033[0m'
+heading() { printf '%b%s%b\n' "${INFO_COLOR}" "$1" "${RESET_COLOR}"; }
+
+heading "Plan written to:"
+echo "  ${OUTPUT_PATH}"
+heading "Plan name:"
+echo "  ${SUT_NAME}"
 echo
-echo "Run Fastpath with:"
+heading "Run Fastpath with:"
 echo "  fastpath plan exec --output results/ ${OUTPUT_PATH}"
 echo
-echo "After Fastpath run completes, gather results with:"
+heading "After Fastpath run completes, gather results with:"
 echo "  fastpath result list results/ --object swprofile"
 echo
-echo "Relative results per kernel:"
+heading "Relative results per kernel:"
 echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --relative"
 echo "  fastpath result show results/ --swprofile ${PROFILE1_NAME} --relative"
 echo
-echo "Comparison between kernels:"
+heading "Comparison between kernels:"
 echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --swprofile ${PROFILE1_NAME} --relative"
