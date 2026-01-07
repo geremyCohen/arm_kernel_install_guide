@@ -11,7 +11,7 @@ require_cmd() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEMPLATE_PATH="${REPO_ROOT}/plans/speedometer.yaml"
-OUTPUT_PATH="${REPO_ROOT}/plan.yaml"
+OUTPUT_DIR="${REPO_ROOT}/plans"
 KERNEL_BASE="${HOME}/kernels"
 
 require_cmd yq
@@ -33,6 +33,8 @@ fi
 
 PLAN_SUFFIX="$(date +%m%d%y-%H%M)"
 SUT_NAME="fastpath_test_${PLAN_SUFFIX}"
+mkdir -p "${OUTPUT_DIR}"
+OUTPUT_PATH="${OUTPUT_DIR}/${SUT_NAME}.yaml"
 
 mapfile -t sorted_entries < <(LC_ALL=C ls -1t "${KERNEL_BASE}" 2>/dev/null || true)
 selected_dirs=()
