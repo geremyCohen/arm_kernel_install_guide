@@ -14,6 +14,17 @@ TEMPLATE_PATH="${REPO_ROOT}/plans/speedometer.yaml"
 OUTPUT_DIR="${REPO_ROOT}/plans"
 KERNEL_BASE="${HOME}/kernels"
 
+sanitize_profile_name() {
+  local raw="$1"
+  local stripped
+  stripped="$(printf '%s' "${raw}" | tr -cd 'A-Za-z0-9_.-')"
+  if [[ -z "${stripped}" ]]; then
+    echo "fp_profile"
+  else
+    echo "fp_${stripped}"
+  fi
+}
+
 require_cmd yq
 
 if [[ ! -f "${TEMPLATE_PATH}" ]]; then
@@ -52,10 +63,12 @@ if (( ${#selected_dirs[@]} < 2 )); then
   exit 1
 fi
 
-PROFILE0_NAME="$(basename "${selected_dirs[0]}")"
+PROFILE0_RAW="$(basename "${selected_dirs[0]}")"
+PROFILE0_NAME="$(sanitize_profile_name "${PROFILE0_RAW}")"
 PROFILE0_KERNEL="${selected_dirs[0]}/Image.gz"
 PROFILE0_MODULES="${selected_dirs[0]}/modules.tar.xz"
-PROFILE1_NAME="$(basename "${selected_dirs[1]}")"
+PROFILE1_RAW="$(basename "${selected_dirs[1]}")"
+PROFILE1_NAME="$(sanitize_profile_name "${PROFILE1_RAW}")"
 PROFILE1_KERNEL="${selected_dirs[1]}/Image.gz"
 PROFILE1_MODULES="${selected_dirs[1]}/modules.tar.xz"
 
