@@ -9,6 +9,8 @@ On systems that don't require building, use a c8g.8xl.  For systems that do requ
 
 ./scripts/kernel_build_and_install.sh --demo-default-build # verify single-tag (v6.18.1) build without fastpath and ensure docker is NOT installed.
 
+./scripts/kernel_build_and_install.sh --help # confirm the help output omits the old --repo/--branch flags and matches the documented flag list.
+
 ./scripts/kernel_build_and_install.sh --demo-fastpath-build # verify two-tag build with fastpath configs and confirm docker IS installed.
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1 --dry-run # Expect a /tmp/kernel_plan_* script containing the full build logic with identical arguments (minus --dry-run). Confirm nothing is installed (no apt output and ~/kernels untouched) and note the path for reuse.

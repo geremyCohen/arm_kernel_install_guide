@@ -12,8 +12,6 @@ Usage: configure_fastpath_sut.sh --host <ip-or-name> [options]
 
 Options:
   --host <host>            Target hostname or IP (required)
-  --ssh-user <name>        Existing admin user to SSH as (default: ubuntu)
-  --fp-user <name>         Fastpath user to create/configure (default: fpuser)
   -h, --help               Show this message
 USAGE
 }
@@ -31,8 +29,6 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host) HOST="$2"; shift 2 ;;
-      --ssh-user) SSH_USER="$2"; shift 2 ;;
-      --fp-user) FP_USER="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown argument: $1" ;;
     esac

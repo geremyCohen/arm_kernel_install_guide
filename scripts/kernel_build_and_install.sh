@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 
-REPO_DEFAULT="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
-BRANCH_DEFAULT="linux-rolling-stable"
+KERNEL_REPO="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+KERNEL_BRANCH="linux-rolling-stable"
 TAG_DEFAULT=""
 CONFIG_FILE_DEFAULT=""
 KERNEL_CMDLINE_DEFAULT=""
@@ -24,8 +24,6 @@ REQUIRES_DOCKER_DEFAULT="false"
 INSTALL_FORMAT_DEFAULT="auto"
 DRY_RUN_DEFAULT="false"
 
-REPO="${REPO_DEFAULT}"
-BRANCH="${BRANCH_DEFAULT}"
 CONFIG_FILE="${CONFIG_FILE_DEFAULT}"
 KERNEL_CMDLINE="${KERNEL_CMDLINE_DEFAULT}"
 APPEND_TO_KERNEL_VERSION="${APPEND_TO_KERNEL_VERSION_DEFAULT}"
@@ -54,8 +52,6 @@ usage() {
 Usage: kernel_build_and_install.sh [options]
 
 Options:
-  --repo <url>                     Kernel git repo (default: Linux stable repo)
-  --branch <name>                  Kernel branch to build (default: linux-rolling-stable)
   --tag <tag>                      Kernel tag to checkout (can be repeated)
   --tags <tag1,tag2>               Comma-separated list of tags to build
   --tag-latest                     Add the latest stable kernel (empty tag)
@@ -707,8 +703,8 @@ summarize_settings() {
   local tag_summary="$(IFS=','; echo "${formatted_tags[*]}")"
   cat <<EOF
 Kernel build settings:
-  Repo:                ${REPO}
-  Branch:              ${BRANCH}
+  Repo:                ${KERNEL_REPO}
+  Branch:              ${KERNEL_BRANCH}
   Tags:                ${tag_summary}
   Config file:         ${CONFIG_FILE:-/boot/config-$(uname -r)}
   Kernel dir base:     ${KERNEL_DIR}
@@ -752,7 +748,7 @@ build_kernel_for_tag() {
   base_config_source="$(resolve_base_config_source)"
 
   log "[${label}] Preparing build for tag ${tag_display}"
-  clone_kernel_repo "${REPO}" "${BRANCH}" "${tag}" "${kernel_dir}"
+  clone_kernel_repo "${KERNEL_REPO}" "${KERNEL_BRANCH}" "${tag}" "${kernel_dir}"
   prepare_kernel_tree "${kernel_dir}"
   stage_base_config "${base_config}" "${base_config_source}"
   write_custom_configs "${custom_config}" "${FASTPATH}" "${CHANGE_TO_64K}" "${tag}"
@@ -796,16 +792,6 @@ build_kernel_for_tag() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --repo)
-        REPO="$2"
-        FORWARDED_ARGS+=("--repo" "$2")
-        shift 2
-        ;;
-      --branch)
-        BRANCH="$2"
-        FORWARDED_ARGS+=("--branch" "$2")
-        shift 2
-        ;;
       --tag)
         TAGS+=("$2")
         FORWARDED_ARGS+=("--tag" "$2")
@@ -974,7 +960,6 @@ main() {
   fi
   TOTAL_BUILDS=${#TAGS[@]}
 
-  [[ -n "${REPO}" ]] || fail "Kernel repo (--repo) cannot be empty"
   if [[ -n "${CONFIG_FILE}" && ! -f "${CONFIG_FILE}" ]]; then
     fail "Config file ${CONFIG_FILE} does not exist"
   fi
