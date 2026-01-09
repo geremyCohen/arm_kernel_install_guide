@@ -12,7 +12,6 @@ Usage: configure_fastpath_host.sh --host <ip-or-name> [options]
 
 Options:
   --host <host>       Target fastpath host (required)
-  --ssh-user <name>   SSH user with sudo rights (default: ubuntu)
   -h, --help          Show this message
 USAGE
 }
@@ -24,8 +23,7 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host) HOST="$2"; shift 2 ;;
-      --ssh-user) SSH_USER="$2"; shift 2 ;;
-      -h|--help) usage; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
       *) fail "Unknown option $1" ;;
     esac
   done

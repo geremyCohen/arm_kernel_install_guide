@@ -16,10 +16,6 @@ Usage: pull_kernel_artifacts.sh --host <ip-or-name> [options]
 
 Options:
   --host <host>             Kernel build host to pull from (required)
-  --ssh-user <name>         SSH user on the build host (default: ubuntu)
-  --remote-dir <path>       Remote kernels directory (default: ~/work/kernel-builds/fastpath)
-  --local-dir <path>        Local destination directory (default: ~/kernels)
-  --version <name>          Specific kernel version directory to copy (may be repeated)
   -h, --help                Show this message
 USAGE
 }
@@ -31,10 +27,6 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --host) HOST="$2"; shift 2 ;;
-      --ssh-user) SSH_USER="$2"; shift 2 ;;
-      --remote-dir) REMOTE_DIR="$2"; shift 2 ;;
-      --local-dir) LOCAL_DIR="$2"; shift 2 ;;
-      --version) VERSIONS+=("$2"); shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) fail "Unknown option $1" ;;
     esac
