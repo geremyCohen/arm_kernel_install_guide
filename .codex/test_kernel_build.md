@@ -31,11 +31,11 @@ On systems that don't require building, use a c8g.8xl.  For systems that do requ
 
 ./scripts/kernel_build_and_install.sh --tag-latest # Build the latest stable kernel and verify artifacts appear under ~/kernels/<latest>.
 
-./scripts/kernel_build_and_install.sh --tags v6.18.1 --change-to-64k true --kernel-install true # After the automatic reboot, verify uname -r matches the build and `getconf PAGE_SIZE` returns 65536.
+./scripts/kernel_build_and_install.sh --tags v6.18.1 --change-to-64k true --kernel-install true --append-to-kernel-version "-64k" # Reproduce install-guide Example 6 with flat artifacts only; after the reboot, confirm uname -r includes the suffix and `getconf PAGE_SIZE` reports 65536.
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1 --config-file ~/kernels/stock-configs/config-6.14.0-1015-aws # Build using a preserved stock config.
 
-./scripts/kernel_build_and_install.sh --tags v6.18.1 --change-to-64k true --include-bindeb-pkg --kernel-install true # Confirm .deb artifacts exist, wait for the automatic reboot, then verify uname -r and `getconf PAGE_SIZE` show the installed 64K kernel.
+./scripts/kernel_build_and_install.sh --tags v6.18.1 --change-to-64k true --include-bindeb-pkg --kernel-install true --append-to-kernel-version "-64k" # Repeat Example 6 while producing .deb packages; verify both flat and .deb artifacts exist, the reboot succeeds, uname -r carries the suffix, and `getconf PAGE_SIZE` is 65536.
 
 ./scripts/kernel_build_and_install.sh --tags v6.18.1,v6.19-rc1 --kernel-install v6.18.1 # Multi-tag build: install only the specified tag, allow the automatic reboot, and verify uname -r matches v6.18.1 while both tag outputs exist under ~/kernels.
 
@@ -46,6 +46,10 @@ On systems that don't require building, use a c8g.8xl.  For systems that do requ
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format flat # After building but skipping install, reuse the saved flat artifacts; the script reboots automatically and uname -r should match the installed kernel.
 
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 --install-format deb # After building with --include-bindeb-pkg, install from the generated .deb files, wait for the automatic reboot, and confirm uname -r plus dpkg -l show the new kernel packages.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1-64k --install-format flat # Using the flat artifacts produced by the Example 6 build, verify the install-only flow boots into the suffixed kernel and `getconf PAGE_SIZE` returns 65536.
+
+./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1-64k --install-format deb # Using the matching .deb artifacts, confirm dpkg installs succeed, the rebooted system runs the suffixed 64K kernel, and dpkg -l lists the packages.
 
 ./scripts/kernel_build_and_install.sh --install-from ~/kernels/6.18.1 # Auto-detect install format; ensure the directory already contains either flat artifacts or .deb packages, then let the automatic reboot occur and verify uname -r matches the installed kernel.
 

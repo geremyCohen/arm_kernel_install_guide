@@ -49,7 +49,7 @@ get_remote_home() {
 resolve_remote_path() {
   local path="$1"
   local remote_home="$2"
-  local default_rel="work/kernel-builds/fastpath"
+  local default_rel="kernels"
   if [[ -z "${path}" ]]; then
     printf '%s/%s\n' "${remote_home}" "${default_rel}"
     return
