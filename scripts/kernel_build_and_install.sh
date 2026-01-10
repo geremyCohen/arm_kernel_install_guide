@@ -60,7 +60,6 @@ Options:
   --append-to-kernel-version <str> Text appended to EXTRAVERSION
   --append <str>                   Alias for --append-to-kernel-version
   --kernel-dir <path>              Base directory for kernel repo (default: ~/kernels/linux)
-  --output-base <path>             Directory where build outputs go (default: ~/kernels)
   --kernel-install [tag|bool]      Install kernel (multi-tag requires tag name)
   --change-to-64k <bool>           Enable 64K page size (default: false)
   --fastpath <bool>                Apply fastpath configs (default: false)
@@ -769,7 +768,7 @@ build_kernel_for_tag() {
   built_kernel_version="$(determine_built_kernel_release "${kernel_dir}" "${output_dir}/build" "${kernel_version}" "${output_dir}")"
   if [[ "${built_kernel_version}" != "${kernel_version}" ]]; then
     local new_output_dir="${OUTPUT_BASE}/${built_kernel_version}"
-    [[ -e "${new_output_dir}" ]] && fail "Output directory ${new_output_dir} already exists; remove it or choose a different --output-base"
+    [[ -e "${new_output_dir}" ]] && fail "Output directory ${new_output_dir} already exists; remove it before re-running"
     mv "${output_dir}" "${new_output_dir}"
     output_dir="${new_output_dir}"
   fi
@@ -874,11 +873,6 @@ main() {
       --kernel-dir)
         KERNEL_DIR="$2"
         FORWARDED_ARGS+=("--kernel-dir" "$2")
-        shift 2
-        ;;
-      --output-base)
-        OUTPUT_BASE="$2"
-        FORWARDED_ARGS+=("--output-base" "$2")
         shift 2
         ;;
       --venv-path)
