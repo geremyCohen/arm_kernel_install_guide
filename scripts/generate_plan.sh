@@ -131,14 +131,14 @@ heading "Plan written to:"
 echo "  ${OUTPUT_PATH}"
 echo
 heading "Run Fastpath with:"
-echo "  fastpath plan exec --output results/ ${OUTPUT_PATH}"
+echo "  ~/fastpath/fastpath plan exec --output results/ ${OUTPUT_PATH}"
 echo
 heading "After Fastpath run completes, gather results with:"
-echo "  fastpath result list results/ --object swprofile"
+echo "  ~/fastpath/fastpath result list results/ --object swprofile"
 echo
 heading "Relative results per kernel:"
-echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --relative"
-echo "  fastpath result show results/ --swprofile ${PROFILE1_NAME} --relative"
+echo "  ~/fastpath/fastpath result show results/ --swprofile ${PROFILE0_NAME} --relative"
+echo "  ~/fastpath/fastpath result show results/ --swprofile ${PROFILE1_NAME} --relative"
 echo
 heading "Comparison between kernels:"
-echo "  fastpath result show results/ --swprofile ${PROFILE0_NAME} --swprofile ${PROFILE1_NAME} --relative"
+echo "  ~/fastpath/fastpath result show results/ --swprofile ${PROFILE0_NAME} --swprofile ${PROFILE1_NAME} --relative"
