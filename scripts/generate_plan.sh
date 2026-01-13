@@ -82,7 +82,7 @@ export PLAN_PROFILE1_KERNEL="${PROFILE1_KERNEL}"
 export PLAN_PROFILE1_MODULES="${PROFILE1_MODULES}"
 
 FILTER='.sut.name = env.PLAN_SUT_NAME | .sut.connection.params.host = env.PLAN_SUT_IP | .swprofiles = [{name: env.PLAN_PROFILE0_NAME, kernel: env.PLAN_PROFILE0_KERNEL, modules: env.PLAN_PROFILE0_MODULES}, {name: env.PLAN_PROFILE1_NAME, kernel: env.PLAN_PROFILE1_KERNEL, modules: env.PLAN_PROFILE1_MODULES}]'
-yq -y "${FILTER}" "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
+yq --indentless-lists -y "${FILTER}" "${TEMPLATE_PATH}" > "${OUTPUT_PATH}"
 
 INFO_COLOR='\033[1;36m'
 RESET_COLOR='\033[0m'
