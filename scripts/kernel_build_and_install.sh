@@ -89,6 +89,33 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command '$1' not found in PATH"
 }
 
+HASH_CMD=()
+select_hash_cmd() {
+  if (( ${#HASH_CMD[@]} > 0 )); then
+    return
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    HASH_CMD=(sha256sum)
+  elif command -v shasum >/dev/null 2>&1; then
+    HASH_CMD=(shasum -a 256)
+  else
+    fail "Required command 'sha256sum' or 'shasum' not found in PATH"
+  fi
+}
+
+plan_args_hash() {
+  local -a args=("$@")
+  select_hash_cmd
+  local raw
+  if (( ${#args[@]} == 0 )); then
+    raw="$(printf '%s' "defaults" | "${HASH_CMD[@]}")"
+  else
+    raw="$(printf '%s\n' "${args[@]}" | "${HASH_CMD[@]}")"
+  fi
+  raw="$(awk '{print $1}' <<<"${raw}")"
+  printf '%s\n' "${raw:0:10}"
+}
+
 parse_bool() {
   case "${1,,}" in
     y|yes|true|1) echo "true" ;;
@@ -375,15 +402,9 @@ detect_artifact_kernel_release() {
   local fallback="$2"
   local metadata_file="${artifact_dir}/metadata.json"
   if [[ -f "${metadata_file}" ]]; then
+    require_cmd jq
     local release=""
-    release="$(python3 - "${metadata_file}" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path) as fh:
-    data = json.load(fh)
-print(data.get("source", {}).get("kernelrelease", ""))
-PY
-)" || release=""
+    release="$(jq -r '.source.kernelrelease // ""' "${metadata_file}" 2>/dev/null || true)"
     if [[ -n "${release}" ]]; then
       echo "${release}"
       return
@@ -622,10 +643,13 @@ update_forwarded_arg() {
 
 generate_plan_script() {
   local plan_args=("$@")
-  require_cmd python3
-  local label_source="${plan_args[*]}"
+  local plan_arg_count=${#plan_args[@]}
+  local label_source=""
+  if (( plan_arg_count > 0 )); then
+    label_source="${plan_args[*]}"
+  fi
   local sanitized
-  if [[ -z "${label_source}" ]]; then
+  if (( plan_arg_count == 0 )) || [[ -z "${label_source}" ]]; then
     sanitized="defaults"
   else
     sanitized="$(printf '%s' "${label_source}" | tr ' ' '_' | tr -cd '[:alnum:]_-')"
@@ -633,14 +657,11 @@ generate_plan_script() {
     sanitized="${sanitized:0:48}"
   fi
   local hash
-  hash="$(printf '%s\n' "${plan_args[@]}" | python3 - <<'PY'
-import hashlib, sys
-data = sys.stdin.read().encode()
-if not data:
-    data = b'defaults'
-print(hashlib.sha256(data).hexdigest()[:10])
-PY
-)"
+  if (( plan_arg_count == 0 )); then
+    hash="$(plan_args_hash)"
+  else
+    hash="$(plan_args_hash "${plan_args[@]}")"
+  fi
   local tmp_dir="${TMPDIR:-/tmp}"
   local file_name="kernel_plan_${sanitized}_${hash}.sh"
   PLAN_FILE_PATH="${tmp_dir}/${file_name}"
@@ -963,7 +984,11 @@ main() {
   fi
 
   if [[ "${DRY_RUN}" == "true" ]]; then
-    generate_plan_script "${FORWARDED_ARGS[@]}"
+    if (( ${#FORWARDED_ARGS[@]} == 0 )); then
+      generate_plan_script
+    else
+      generate_plan_script "${FORWARDED_ARGS[@]}"
+    fi
     exit 0
   fi
 
@@ -1058,4 +1083,6 @@ main() {
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
