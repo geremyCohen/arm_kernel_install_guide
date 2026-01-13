@@ -402,15 +402,9 @@ detect_artifact_kernel_release() {
   local fallback="$2"
   local metadata_file="${artifact_dir}/metadata.json"
   if [[ -f "${metadata_file}" ]]; then
+    require_cmd jq
     local release=""
-    release="$(python3 - "${metadata_file}" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path) as fh:
-    data = json.load(fh)
-print(data.get("source", {}).get("kernelrelease", ""))
-PY
-)" || release=""
+    release="$(jq -r '.source.kernelrelease // ""' "${metadata_file}" 2>/dev/null || true)"
     if [[ -n "${release}" ]]; then
       echo "${release}"
       return
@@ -1089,4 +1083,6 @@ main() {
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
