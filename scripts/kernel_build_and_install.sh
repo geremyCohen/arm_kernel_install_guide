@@ -614,9 +614,20 @@ install_kernel_artifacts() {
   if [[ -f "${output_dir}/perf.tar.xz" ]]; then
     sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
   fi
-  if [[ -f "${output_dir}/cpupower.tar.xz" ]]; then
-    sudo tar -C /usr/bin -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 ./usr/bin/cpupower
-    sudo tar -C /usr/lib -xf "${output_dir}/cpupower.tar.xz" --strip-components=3 --wildcards ./usr/lib/libcpupower.so*
+  local cpupower_tar="${output_dir}/cpupower.tar.xz"
+  if [[ -f "${cpupower_tar}" ]]; then
+    sudo tar -C /usr/bin -xf "${cpupower_tar}" --strip-components=3 ./usr/bin/cpupower
+    local cpupower_lib_glob=""
+    if grep -qE '^(\./)?usr/lib64/libcpupower\.so' < <(tar -tf "${cpupower_tar}" 2>/dev/null); then
+      cpupower_lib_glob='./usr/lib64/libcpupower.so*'
+    elif grep -qE '^(\./)?usr/lib/libcpupower\.so' < <(tar -tf "${cpupower_tar}" 2>/dev/null); then
+      cpupower_lib_glob='./usr/lib/libcpupower.so*'
+    fi
+    if [[ -n "${cpupower_lib_glob}" ]]; then
+      sudo tar -C /usr/lib -xf "${cpupower_tar}" --strip-components=3 --wildcards "${cpupower_lib_glob}"
+    else
+      log "cpupower archive missing libcpupower.so under usr/lib or usr/lib64; skipping shared library install"
+    fi
   fi
   sudo ldconfig
   log "Generating initramfs for ${kernel_version}"
