@@ -541,6 +541,74 @@ apply_kernel_cmdline() {
   sudo update-grub || true
 }
 
+find_grub_cfg_path() {
+  local -a candidates=("/boot/grub/grub.cfg" "/boot/grub2/grub.cfg")
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_grub_menuentry_id() {
+  local kernel_version="$1"
+  local grub_cfg="$2"
+  [[ -f "${grub_cfg}" ]] || return 1
+  awk -F"'" -v want="${kernel_version}" '
+    $1 ~ /^[[:space:]]*menuentry / {
+      title=$2
+      if (index(title, "Linux " want) == 0) {
+        next
+      }
+      if (index(title, "(recovery mode)") > 0) {
+        next
+      }
+      for (i = 4; i <= NF; i += 2) {
+        if ($(i-1) ~ /menuentry_id_option/) {
+          print $i
+          exit
+        }
+      }
+    }
+  ' "${grub_cfg}"
+}
+
+set_one_time_boot_entry() {
+  local kernel_version="$1"
+  local reboot_cmd=""
+  if command -v grub-reboot >/dev/null 2>&1; then
+    reboot_cmd="grub-reboot"
+  elif command -v grub2-reboot >/dev/null 2>&1; then
+    reboot_cmd="grub2-reboot"
+  else
+    log "grub-reboot not found; skipping one-time boot target selection"
+    return 0
+  fi
+
+  local grub_cfg=""
+  grub_cfg="$(find_grub_cfg_path || true)"
+  if [[ -z "${grub_cfg}" ]]; then
+    log "grub.cfg not found; skipping one-time boot target selection"
+    return 0
+  fi
+
+  local entry_id=""
+  entry_id="$(find_grub_menuentry_id "${kernel_version}" "${grub_cfg}" || true)"
+  if [[ -z "${entry_id}" ]]; then
+    log "No GRUB entry id found for kernel ${kernel_version}; continuing with default boot entry"
+    return 0
+  fi
+
+  if sudo "${reboot_cmd}" "${entry_id}"; then
+    log "Configured one-time boot entry ${entry_id} for kernel ${kernel_version}"
+  else
+    log "Failed to set one-time boot entry ${entry_id}; continuing with default boot entry"
+  fi
+}
+
 install_kernel_from_debs() {
   local dir="$1"
   local kernel_cmdline="$2"
@@ -596,7 +664,7 @@ install_prebuilt_kernel() {
   esac
 
   log "Kernel ${kernel_version} installation complete"
-  prompt_reboot
+  prompt_reboot "${kernel_version}"
 }
 
 install_kernel_artifacts() {
@@ -637,6 +705,10 @@ install_kernel_artifacts() {
 }
 
 prompt_reboot() {
+  local kernel_version="${1-}"
+  if [[ -n "${kernel_version}" ]]; then
+    set_one_time_boot_entry "${kernel_version}"
+  fi
   log "Kernel installed. Rebooting immediately."
   sudo reboot
 }
@@ -816,7 +888,7 @@ build_kernel_for_tag() {
 
   if [[ "${install_this_tag}" == "true" ]]; then
     install_kernel_artifacts "${output_dir}" "${kernel_version}" "${KERNEL_CMDLINE}"
-    prompt_reboot
+    prompt_reboot "${kernel_version}"
   fi
 }
 
