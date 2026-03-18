@@ -261,7 +261,7 @@ install_packages() {
   DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
 
   local packages=(
-    socat python3-pip python3-venv git bc rsync dwarves build-essential
+    socat python3-pip python3-venv git bc gawk rsync dwarves build-essential
     libncurses5-dev bison flex libssl-dev libelf-dev debhelper-compat
     pkg-config libtraceevent-dev libtracefs-dev libdw-dev systemtap-sdt-dev
     libunwind-dev libslang2-dev libperl-dev libcapstone-dev libnuma-dev
