@@ -15,6 +15,12 @@ call_reader() {
   bash -c "source '${SCRIPT_PATH}'; find_grub_menuentry_id '${kernel_version}' '${grub_cfg}'"
 }
 
+call_path_reader() {
+  local kernel_version="$1"
+  local grub_cfg="$2"
+  bash -c "source '${SCRIPT_PATH}'; find_grub_menuentry_path '${kernel_version}' '${grub_cfg}'"
+}
+
 tmp="$(mktemp -d)"
 trap "rm -rf '${tmp}'" EXIT
 
@@ -40,5 +46,14 @@ got_4k="$(call_reader "6.1.87-ubuntu-4k+" "${grub_cfg}")"
 
 missing="$(call_reader "9.9.9-missing" "${grub_cfg}" || true)"
 [[ -z "${missing}" ]] || fail "Expected empty result for missing kernel, got '${missing}'"
+
+path_64k="$(call_path_reader "6.1.87-ubuntu-64k-64k+" "${grub_cfg}")"
+[[ "${path_64k}" == "1>0" ]] || fail "64k path mismatch: ${path_64k}"
+
+path_4k="$(call_path_reader "6.1.87-ubuntu-4k+" "${grub_cfg}")"
+[[ "${path_4k}" == "1>2" ]] || fail "4k path mismatch: ${path_4k}"
+
+missing_path="$(call_path_reader "9.9.9-missing" "${grub_cfg}" || true)"
+[[ -z "${missing_path}" ]] || fail "Expected empty path for missing kernel, got '${missing_path}'"
 
 echo "All GRUB menu entry tests passed."

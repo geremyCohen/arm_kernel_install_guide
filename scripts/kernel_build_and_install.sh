@@ -596,6 +596,70 @@ find_grub_menuentry_id() {
   ' "${grub_cfg}"
 }
 
+find_grub_menuentry_path() {
+  local kernel_version="$1"
+  local grub_cfg="$2"
+  [[ -f "${grub_cfg}" ]] || return 1
+  awk -F"'" -v want="${kernel_version}" '
+    function brace_delta(line,    tmp, opens, closes) {
+      tmp = line
+      opens = gsub(/\{/, "", tmp)
+      tmp = line
+      closes = gsub(/\}/, "", tmp)
+      return opens - closes
+    }
+
+    BEGIN {
+      top_index = -1
+      in_submenu = 0
+      submenu_top_index = -1
+      submenu_child_index = 0
+      submenu_depth = 0
+    }
+
+    {
+      line = $0
+
+      if (in_submenu == 0 && line ~ /^[[:space:]]*submenu /) {
+        top_index++
+        submenu_top_index = top_index
+        submenu_child_index = 0
+        in_submenu = 1
+        submenu_depth = brace_delta(line)
+        next
+      }
+
+      if (in_submenu == 0 && line ~ /^[[:space:]]*menuentry /) {
+        top_index++
+        title = $2
+        if (index(title, "Linux " want) > 0 && index(title, "(recovery mode)") == 0) {
+          print top_index
+          exit
+        }
+        next
+      }
+
+      if (in_submenu == 1 && line ~ /^[[:space:]]*menuentry /) {
+        title = $2
+        path = submenu_top_index ">" submenu_child_index
+        submenu_child_index++
+        if (index(title, "Linux " want) > 0 && index(title, "(recovery mode)") == 0) {
+          print path
+          exit
+        }
+      }
+
+      if (in_submenu == 1) {
+        submenu_depth += brace_delta(line)
+        if (submenu_depth <= 0) {
+          in_submenu = 0
+          submenu_depth = 0
+        }
+      }
+    }
+  ' "${grub_cfg}"
+}
+
 set_persistent_boot_entry() {
   local kernel_version="$1"
   local set_default_cmd=""
@@ -611,27 +675,32 @@ set_persistent_boot_entry() {
   local grub_cfg=""
   grub_cfg="$(find_grub_cfg_path || true)"
   if [[ -z "${grub_cfg}" ]]; then
-    log "grub.cfg not found; skipping one-time boot target selection"
+    log "grub.cfg not found; skipping persistent boot target selection"
     return 0
   fi
 
+  local entry_selector=""
+  entry_selector="$(find_grub_menuentry_path "${kernel_version}" "${grub_cfg}" || true)"
   local entry_id=""
-  entry_id="$(find_grub_menuentry_id "${kernel_version}" "${grub_cfg}" || true)"
-  if [[ -z "${entry_id}" ]]; then
+  if [[ -z "${entry_selector}" ]]; then
+    entry_id="$(find_grub_menuentry_id "${kernel_version}" "${grub_cfg}" || true)"
+    entry_selector="${entry_id}"
+  fi
+  if [[ -z "${entry_selector}" ]]; then
     log "No GRUB entry id found for kernel ${kernel_version}; continuing with current default boot entry"
     return 0
   fi
 
-  if "${set_default_cmd}" "${entry_id}"; then
+  if "${set_default_cmd}" "${entry_selector}"; then
     # Clear any stale one-time next_entry so the persistent choice is used.
     if command -v grub-editenv >/dev/null 2>&1; then
       grub-editenv - unset next_entry || true
     elif command -v grub2-editenv >/dev/null 2>&1; then
       grub2-editenv - unset next_entry || true
     fi
-    log "Configured persistent default boot entry ${entry_id} for kernel ${kernel_version}"
+    log "Configured persistent default boot entry ${entry_selector} for kernel ${kernel_version}"
   else
-    log "Failed to set persistent default boot entry ${entry_id}; continuing with current default boot entry"
+    log "Failed to set persistent default boot entry ${entry_selector}; continuing with current default boot entry"
   fi
 }
 
