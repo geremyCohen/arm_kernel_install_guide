@@ -5,6 +5,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 
+DEFAULT_WORK_HOME="${HOME}"
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+  sudo_user_home="$(getent passwd "${SUDO_USER}" 2>/dev/null | awk -F: '{print $6}' || true)"
+  if [[ -n "${sudo_user_home}" ]]; then
+    DEFAULT_WORK_HOME="${sudo_user_home}"
+  fi
+fi
+
 KERNEL_REPO="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 KERNEL_BRANCH="linux-rolling-stable"
 TAG_DEFAULT=""
@@ -14,9 +22,9 @@ APPEND_TO_KERNEL_VERSION_DEFAULT=""
 KERNEL_INSTALL_DEFAULT="false"
 CHANGE_TO_64K_DEFAULT="false"
 FASTPATH_DEFAULT="false"
-KERNEL_DIR_DEFAULT="${HOME}/kernels/linux"
-OUTPUT_BASE_DEFAULT="${HOME}/kernels"
-VENV_PATH_DEFAULT="${HOME}/venv-tuxmake"
+KERNEL_DIR_DEFAULT="${DEFAULT_WORK_HOME}/kernels/linux"
+OUTPUT_BASE_DEFAULT="${DEFAULT_WORK_HOME}/kernels"
+VENV_PATH_DEFAULT="${DEFAULT_WORK_HOME}/venv-tuxmake"
 INCLUDE_BINDEB_PKG_DEFAULT="false"
 DEMO_FASTPATH_BUILDS_DEFAULT="false"
 DEMO_DEFAULT_BUILD_DEFAULT="false"
