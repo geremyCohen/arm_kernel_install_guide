@@ -73,6 +73,7 @@ Options:
   -h, --help                       Show this help message
 
 Booleans accept: true/false/yes/no/1/0 (case-insensitive).
+Run as root for build/install operations.
 USAGE
 }
 
@@ -87,6 +88,12 @@ fail() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command '$1' not found in PATH"
+}
+
+require_root() {
+  if (( EUID != 0 )); then
+    fail "This script must be run as root. Re-run with sudo."
+  fi
 }
 
 HASH_CMD=()
@@ -241,9 +248,9 @@ FASTPATH
 
 install_packages() {
   log "Updating apt metadata"
-  sudo apt-get update -y
+  apt-get update -y
   log "Upgrading packages"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
+  DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
 
   local packages=(
     socat python3-pip python3-venv git bc rsync dwarves build-essential
@@ -259,7 +266,7 @@ install_packages() {
   fi
 
   log "Installing kernel build dependencies"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
 }
 
 ensure_virtualenv() {
@@ -536,9 +543,14 @@ detect_install_format() {
 apply_kernel_cmdline() {
   local kernel_cmdline="$1"
   if [[ -n "${kernel_cmdline}" ]]; then
-    sudo sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
+    sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
   fi
-  sudo update-grub || true
+  if grep -q '^GRUB_DEFAULT=' /etc/default/grub; then
+    sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+  else
+    printf '\nGRUB_DEFAULT=saved\n' >> /etc/default/grub
+  fi
+  update-grub || true
 }
 
 find_grub_cfg_path() {
@@ -576,15 +588,15 @@ find_grub_menuentry_id() {
   ' "${grub_cfg}"
 }
 
-set_one_time_boot_entry() {
+set_persistent_boot_entry() {
   local kernel_version="$1"
-  local reboot_cmd=""
-  if command -v grub-reboot >/dev/null 2>&1; then
-    reboot_cmd="grub-reboot"
-  elif command -v grub2-reboot >/dev/null 2>&1; then
-    reboot_cmd="grub2-reboot"
+  local set_default_cmd=""
+  if command -v grub-set-default >/dev/null 2>&1; then
+    set_default_cmd="grub-set-default"
+  elif command -v grub2-set-default >/dev/null 2>&1; then
+    set_default_cmd="grub2-set-default"
   else
-    log "grub-reboot not found; skipping one-time boot target selection"
+    log "grub-set-default not found; skipping persistent boot target selection"
     return 0
   fi
 
@@ -598,14 +610,20 @@ set_one_time_boot_entry() {
   local entry_id=""
   entry_id="$(find_grub_menuentry_id "${kernel_version}" "${grub_cfg}" || true)"
   if [[ -z "${entry_id}" ]]; then
-    log "No GRUB entry id found for kernel ${kernel_version}; continuing with default boot entry"
+    log "No GRUB entry id found for kernel ${kernel_version}; continuing with current default boot entry"
     return 0
   fi
 
-  if sudo "${reboot_cmd}" "${entry_id}"; then
-    log "Configured one-time boot entry ${entry_id} for kernel ${kernel_version}"
+  if "${set_default_cmd}" "${entry_id}"; then
+    # Clear any stale one-time next_entry so the persistent choice is used.
+    if command -v grub-editenv >/dev/null 2>&1; then
+      grub-editenv - unset next_entry || true
+    elif command -v grub2-editenv >/dev/null 2>&1; then
+      grub2-editenv - unset next_entry || true
+    fi
+    log "Configured persistent default boot entry ${entry_id} for kernel ${kernel_version}"
   else
-    log "Failed to set one-time boot entry ${entry_id}; continuing with default boot entry"
+    log "Failed to set persistent default boot entry ${entry_id}; continuing with current default boot entry"
   fi
 }
 
@@ -618,7 +636,7 @@ install_kernel_from_debs() {
     debs+=("$deb")
   done < <(find "${dir}" -maxdepth 1 -type f -name '*.deb' -print0 | LC_ALL=C sort -z)
   (( ${#debs[@]} > 0 )) || fail "No .deb packages found in ${dir}"
-  sudo dpkg -i "${debs[@]}"
+  dpkg -i "${debs[@]}"
   apply_kernel_cmdline "${kernel_cmdline}"
 }
 
@@ -674,17 +692,17 @@ install_kernel_artifacts() {
   local modules_tar="${output_dir}/modules.tar.xz"
   kernel_version="$(detect_artifact_kernel_release "${output_dir}" "${kernel_version}")"
   log "Installing kernel artifacts from ${output_dir} (release ${kernel_version})"
-  sudo cp "${output_dir}/config" "/boot/config-${kernel_version}"
-  sudo cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
-  sudo rm -rf "/lib/modules/${kernel_version}"
-  sudo tar -C /lib -xf "${modules_tar}" --strip-components=1
-  sudo depmod "${kernel_version}"
+  cp "${output_dir}/config" "/boot/config-${kernel_version}"
+  cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
+  rm -rf "/lib/modules/${kernel_version}"
+  tar -C /lib -xf "${modules_tar}" --strip-components=1
+  depmod "${kernel_version}"
   if [[ -f "${output_dir}/perf.tar.xz" ]]; then
-    sudo tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
+    tar -C /usr/bin -xf "${output_dir}/perf.tar.xz" --strip-components=3 ./usr/bin/perf ./usr/bin/trace
   fi
   local cpupower_tar="${output_dir}/cpupower.tar.xz"
   if [[ -f "${cpupower_tar}" ]]; then
-    sudo tar -C /usr/bin -xf "${cpupower_tar}" --strip-components=3 ./usr/bin/cpupower
+    tar -C /usr/bin -xf "${cpupower_tar}" --strip-components=3 ./usr/bin/cpupower
     local cpupower_lib_glob=""
     if grep -qE '^(\./)?usr/lib64/libcpupower\.so' < <(tar -tf "${cpupower_tar}" 2>/dev/null); then
       cpupower_lib_glob='./usr/lib64/libcpupower.so*'
@@ -692,14 +710,14 @@ install_kernel_artifacts() {
       cpupower_lib_glob='./usr/lib/libcpupower.so*'
     fi
     if [[ -n "${cpupower_lib_glob}" ]]; then
-      sudo tar -C /usr/lib -xf "${cpupower_tar}" --strip-components=3 --wildcards "${cpupower_lib_glob}"
+      tar -C /usr/lib -xf "${cpupower_tar}" --strip-components=3 --wildcards "${cpupower_lib_glob}"
     else
       log "cpupower archive missing libcpupower.so under usr/lib or usr/lib64; skipping shared library install"
     fi
   fi
-  sudo ldconfig
+  ldconfig
   log "Generating initramfs for ${kernel_version}"
-  sudo update-initramfs -c -k "${kernel_version}"
+  update-initramfs -c -k "${kernel_version}"
   [[ -f "/boot/initrd.img-${kernel_version}" ]] || fail "Initramfs /boot/initrd.img-${kernel_version} was not created"
   apply_kernel_cmdline "${kernel_cmdline}"
 }
@@ -707,10 +725,10 @@ install_kernel_artifacts() {
 prompt_reboot() {
   local kernel_version="${1-}"
   if [[ -n "${kernel_version}" ]]; then
-    set_one_time_boot_entry "${kernel_version}"
+    set_persistent_boot_entry "${kernel_version}"
   fi
   log "Kernel installed. Rebooting immediately."
-  sudo reboot
+  reboot
 }
 
 update_forwarded_arg() {
@@ -1075,10 +1093,11 @@ main() {
     exit 0
   fi
 
+  require_root
+
   if [[ "${INSTALL_FROM_REQUESTED}" == "true" ]]; then
     summarize_install_from
 
-    require_cmd sudo
     require_cmd dpkg
     require_cmd tar
     install_prebuilt_kernel "${INSTALL_FROM_PATH}" "${INSTALL_FORMAT}" "${KERNEL_CMDLINE}"
@@ -1122,7 +1141,6 @@ main() {
 
   summarize_settings
 
-  require_cmd sudo
   require_cmd git
   require_cmd dpkg
 
