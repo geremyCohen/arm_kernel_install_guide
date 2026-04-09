@@ -69,7 +69,7 @@ Options:
   --append <str>                   Alias for --append-to-kernel-version
   --kernel-dir <path>              Base directory for kernel repo (default: ~/kernels/linux)
   --kernel-install [tag|bool]      Install kernel (multi-tag requires tag name)
-  --change-to-64k <bool>           Enable 64K page size (default: false)
+  --change-to-64k <bool>           Build 64K when true; force 4K when false (default: false)
   --fastpath <bool>                Apply fastpath configs (default: false)
   --venv-path <path>               Python venv for tuxmake (default: ~/venv-tuxmake)
   --include-bindeb-pkg             Add bindeb-pkg target to the tuxmake run (default: omit)
@@ -137,6 +137,15 @@ parse_bool() {
     n|no|false|0) echo "false" ;;
     *) fail "Invalid boolean: ${1}" ;;
   esac
+}
+
+page_size_label() {
+  local change_to_64k="$1"
+  if [[ "${change_to_64k}" == "true" ]]; then
+    echo "64K"
+  else
+    echo "4K"
+  fi
 }
 
 version_in_range() {
@@ -369,6 +378,11 @@ BASE
 CONFIG_ARM64_64K_PAGES=y
 CONFIG_ARM64_4K_PAGES=n
 PAGES
+  else
+    cat >>"${file}" <<'PAGES'
+CONFIG_ARM64_64K_PAGES=n
+CONFIG_ARM64_4K_PAGES=y
+PAGES
   fi
   if [[ -n "${tag}" ]]; then
     local numeric_tag="${tag#v}"
@@ -435,6 +449,49 @@ detect_artifact_kernel_release() {
     fi
   fi
   echo "${fallback}"
+}
+
+detect_kernel_image_artifact() {
+  local artifact_dir="$1"
+  local metadata_file="${artifact_dir}/metadata.json"
+  local kernel_image=""
+  if [[ -f "${metadata_file}" ]] && command -v jq >/dev/null 2>&1; then
+    kernel_image="$(jq -r '.results.artifacts.kernel[]? // empty' "${metadata_file}" 2>/dev/null | awk 'NF { print; exit }')" || kernel_image=""
+    kernel_image="${kernel_image#./}"
+    if [[ -n "${kernel_image}" && -f "${artifact_dir}/${kernel_image}" ]]; then
+      echo "${kernel_image}"
+      return
+    fi
+  fi
+
+  local -a candidates=("Image.gz" "Image" "bzImage" "zImage" "uImage" "vmlinuz")
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${artifact_dir}/${candidate}" ]]; then
+      echo "${candidate}"
+      return
+    fi
+  done
+
+  echo ""
+}
+
+detect_arm64_config_page_size() {
+  local config_file="$1"
+  [[ -f "${config_file}" ]] || return 1
+  if grep -q '^CONFIG_ARM64_64K_PAGES=y' "${config_file}"; then
+    echo "64K"
+    return 0
+  fi
+  if grep -q '^CONFIG_ARM64_4K_PAGES=y' "${config_file}"; then
+    echo "4K"
+    return 0
+  fi
+  if grep -q '^CONFIG_ARM64_16K_PAGES=y' "${config_file}"; then
+    echo "16K"
+    return 0
+  fi
+  return 1
 }
 
 determine_built_kernel_release() {
@@ -536,7 +593,7 @@ detect_install_format() {
         echo "deb"
         return
       fi
-      if [[ -f "${dir}/Image.gz" && -f "${dir}/modules.tar.xz" ]]; then
+      if [[ -n "$(detect_kernel_image_artifact "${dir}")" && -f "${dir}/modules.tar.xz" ]]; then
         echo "flat"
         return
       fi
@@ -744,13 +801,15 @@ install_prebuilt_kernel() {
   local kernel_version
   kernel_version="$(read_kernel_version_from_dir "${source_dir}")"
   [[ -n "${kernel_version}" ]] || fail "Unable to determine kernel version from ${source_dir}"
+  local kernel_image=""
 
   case "${format}" in
     flat)
-      [[ -f "${source_dir}/Image.gz" ]] || fail "Missing Image.gz in ${source_dir}"
+      kernel_image="$(detect_kernel_image_artifact "${source_dir}")"
+      [[ -n "${kernel_image}" ]] || fail "Missing kernel image artifact in ${source_dir}"
       [[ -f "${source_dir}/modules.tar.xz" ]] || fail "Missing modules.tar.xz in ${source_dir}"
       [[ -f "${source_dir}/config" ]] || fail "Missing config in ${source_dir}"
-      install_kernel_artifacts "${source_dir}" "${kernel_version}" "${kernel_cmdline}"
+      install_kernel_artifacts "${source_dir}" "${kernel_version}" "${kernel_cmdline}" "${kernel_image}"
       ;;
     deb)
       kernel_version="$(detect_kernel_version_from_debs "${source_dir}" "${kernel_version}")"
@@ -766,11 +825,16 @@ install_kernel_artifacts() {
   local output_dir="$1"
   local kernel_version="$2"
   local kernel_cmdline="$3"
+  local kernel_image="${4-}"
   local modules_tar="${output_dir}/modules.tar.xz"
   kernel_version="$(detect_artifact_kernel_release "${output_dir}" "${kernel_version}")"
-  log "Installing kernel artifacts from ${output_dir} (release ${kernel_version})"
+  if [[ -z "${kernel_image}" ]]; then
+    kernel_image="$(detect_kernel_image_artifact "${output_dir}")"
+  fi
+  [[ -n "${kernel_image}" ]] || fail "Missing kernel image artifact in ${output_dir}"
+  log "Installing kernel artifacts from ${output_dir} (release ${kernel_version}, image ${kernel_image})"
   cp "${output_dir}/config" "/boot/config-${kernel_version}"
-  cp "${output_dir}/Image.gz" "/boot/vmlinuz-${kernel_version}"
+  cp "${output_dir}/${kernel_image}" "/boot/vmlinuz-${kernel_version}"
   rm -rf "/lib/modules/${kernel_version}"
   tar -C /lib -xf "${modules_tar}" --strip-components=1
   depmod "${kernel_version}"
@@ -908,7 +972,7 @@ Kernel build settings:
   Kernel dir base:     ${KERNEL_DIR}
   Output base:         ${OUTPUT_BASE}
   Fastpath configs:    ${FASTPATH}
-  64K page size:       ${CHANGE_TO_64K}
+  Target page size:    $(page_size_label "${CHANGE_TO_64K}")
   Kernel install:      ${KERNEL_INSTALL}
   Install target:      ${KERNEL_INSTALL_TARGET:-<none>}
   Kernel cmdline:      ${KERNEL_CMDLINE:-<unchanged>}
@@ -962,6 +1026,13 @@ build_kernel_for_tag() {
   log "[${label}] Building kernel ${kernel_version} -> ${output_dir}"
 
   run_tuxmake_build "${kernel_dir}" "${base_config}" "${custom_config}" "${output_dir}" "${VENV_PATH}"
+
+  local expected_build_page_size actual_build_page_size
+  expected_build_page_size="$(page_size_label "${CHANGE_TO_64K}")"
+  actual_build_page_size="$(detect_arm64_config_page_size "${output_dir}/config" || true)"
+  if [[ -n "${actual_build_page_size}" && "${actual_build_page_size}" != "${expected_build_page_size}" ]]; then
+    fail "[${label}] Built kernel page size ${actual_build_page_size} does not match requested ${expected_build_page_size} (base config ${base_config})"
+  fi
 
   local built_kernel_version
   built_kernel_version="$(determine_built_kernel_release "${kernel_dir}" "${output_dir}/build" "${kernel_version}" "${output_dir}")"
