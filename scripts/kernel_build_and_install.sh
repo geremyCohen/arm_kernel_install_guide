@@ -13,7 +13,12 @@ if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
   fi
 fi
 
-KERNEL_REPO="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+DEFAULT_KERNEL_REPO="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+declare -a DEFAULT_KERNEL_REPO_FALLBACKS=(
+  "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+  "https://github.com/gregkh/linux.git"
+)
+KERNEL_REPO="${DEFAULT_KERNEL_REPO}"
 KERNEL_BRANCH="linux-rolling-stable"
 TAG_DEFAULT=""
 CONFIG_FILE_DEFAULT=""
@@ -304,17 +309,63 @@ clone_kernel_repo() {
   local branch="$2"
   local tag="$3"
   local dest="$4"
-  log "Cloning kernel repo into ${dest}"
-  rm -rf "${dest}"
-  mkdir -p "$(dirname "${dest}")"
-  git config --global --add safe.directory "${dest}" >/dev/null 2>&1 || true
-  if [[ -n "${tag}" ]]; then
-    git clone --depth 1 --branch "${tag}" "${repo}" "${dest}"
-  elif [[ -n "${branch}" ]]; then
-    git clone --depth 1 --branch "${branch}" "${repo}" "${dest}"
-  else
-    git clone --depth 1 "${repo}" "${dest}"
+  local -a candidates=("${repo}")
+  if [[ "${repo}" == "${DEFAULT_KERNEL_REPO}" ]]; then
+    candidates+=("${DEFAULT_KERNEL_REPO_FALLBACKS[@]}")
   fi
+
+  local candidate clone_probe_timeout=20 clone_timeout=90
+  local -a probe_cmd clone_cmd
+  local rc
+  for candidate in "${candidates[@]}"; do
+    if [[ -n "${tag}" ]]; then
+      probe_cmd=(git ls-remote --exit-code --refs "${candidate}" "refs/tags/${tag}")
+      clone_cmd=(git clone --depth 1 --branch "${tag}" "${candidate}" "${dest}")
+    elif [[ -n "${branch}" ]]; then
+      probe_cmd=(git ls-remote --exit-code --refs "${candidate}" "refs/heads/${branch}")
+      clone_cmd=(git clone --depth 1 --branch "${branch}" "${candidate}" "${dest}")
+    else
+      probe_cmd=(git ls-remote --exit-code "${candidate}" HEAD)
+      clone_cmd=(git clone --depth 1 "${candidate}" "${dest}")
+    fi
+
+    log "Probing kernel repo ${candidate}"
+    if command -v timeout >/dev/null 2>&1; then
+      if ! timeout "${clone_probe_timeout}" "${probe_cmd[@]}" >/dev/null 2>&1; then
+        log "Kernel repo probe failed for ${candidate}; trying next source"
+        continue
+      fi
+    elif ! "${probe_cmd[@]}" >/dev/null 2>&1; then
+      log "Kernel repo probe failed for ${candidate}; trying next source"
+      continue
+    fi
+
+    log "Cloning kernel repo from ${candidate} into ${dest}"
+    rm -rf "${dest}"
+    mkdir -p "$(dirname "${dest}")"
+    git config --global --add safe.directory "${dest}" >/dev/null 2>&1 || true
+    rc=0
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout "${clone_timeout}" "${clone_cmd[@]}"; then
+        log "Using kernel source ${candidate}"
+        return 0
+      fi
+      rc=$?
+    elif "${clone_cmd[@]}"; then
+      log "Using kernel source ${candidate}"
+      return 0
+    else
+      rc=$?
+    fi
+
+    if [[ "${rc}" -eq 124 ]]; then
+      log "Clone from ${candidate} timed out after ${clone_timeout}s; trying next source"
+      continue
+    fi
+    log "Clone from ${candidate} failed; trying next source"
+  done
+
+  fail "Unable to clone kernel repo from ${repo} or any configured fallback"
 }
 
 prepare_kernel_tree() {
@@ -406,7 +457,11 @@ update_extraversion() {
   os_name="$(lsb_release -si 2>/dev/null | tr '[:upper:]' '[:lower:]' || uname -s | tr '[:upper:]' '[:lower:]')"
   local extra_suffix="-${os_name}${append_value}"
   if [[ "${change_to_64k}" == "true" ]]; then
-    extra_suffix="-${os_name}-64k${append_value}"
+    if [[ "${append_value}" == "-64k" || "${append_value}" == -64k-* || "${append_value}" == *-64k ]]; then
+      extra_suffix="-${os_name}${append_value}"
+    else
+      extra_suffix="-${os_name}-64k${append_value}"
+    fi
   fi
   local new_extraversion
   if [[ -n "${original_extraversion}" ]]; then
@@ -415,6 +470,29 @@ update_extraversion() {
     new_extraversion="${extra_suffix}"
   fi
   sed -i "s/^EXTRAVERSION[[:space:]]*=.*/EXTRAVERSION = ${new_extraversion}/" "${kernel_dir}/Makefile"
+}
+
+disable_initrdless_boot_for_custom_kernel() {
+  local override_file="/etc/default/grub.d/99-custom-kernel-initrd.cfg"
+  local forced_partuuid=""
+  forced_partuuid="$(
+    grep -RhsE '^[[:space:]]*GRUB_FORCE_PARTUUID=' /etc/default/grub /etc/default/grub.d 2>/dev/null \
+      | tail -n1 \
+      | cut -d= -f2- \
+      | tr -d '"' \
+      | tr -d '[:space:]'
+  )" || forced_partuuid=""
+
+  if [[ -z "${forced_partuuid}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${override_file}")"
+  cat >"${override_file}" <<'EOF'
+# Disable Ubuntu cloud-image initrdless boot for custom kernels installed by this script.
+GRUB_FORCE_PARTUUID=
+EOF
+  log "Detected GRUB_FORCE_PARTUUID=${forced_partuuid}; forcing initrd boot via ${override_file}"
 }
 
 collect_kernel_info() {
@@ -610,6 +688,7 @@ apply_kernel_cmdline() {
   if [[ -n "${kernel_cmdline}" ]]; then
     sed -i "s/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${kernel_cmdline}\"/" /etc/default/grub
   fi
+  disable_initrdless_boot_for_custom_kernel
   if grep -q '^GRUB_DEFAULT=' /etc/default/grub; then
     sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
   else
